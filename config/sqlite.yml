@@ -1,0 +1,20 @@
+Default: &defaults
+  database: Hanabi.sqlite3
+  poolsize: 10
+
+Development:
+  <<: *defaults
+
+Testing:
+  database: Hanabi_test.sqlite3
+  <<: *defaults
+
+Staging:
+  database: Hanabi_staging.sqlite3
+  poolsize: 100
+  <<: *defaults
+
+Production:
+  database: Hanabi_production.sqlite3
+  poolsize: 100
+  <<: *defaults

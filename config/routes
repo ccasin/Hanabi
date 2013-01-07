@@ -1,0 +1,16 @@
+/static StaticR Static getStatic
+/auth   AuthR   Auth   getAuth
+
+/favicon.ico FaviconR GET
+/robots.txt RobotsR GET
+
+/ HomeR GET POST
+
+/hanabilobby HanabiLobbyR GET
+/createhanabi CreateHanabiR POST
+/joinhanabi/#GameId JoinHanabiR POST
+/playhanabi PlayHanabiR GET
+/starthanabi StartHanabiR GET
+/gameeventreceive/#GameId GameEventReceiveR GET
+
+/setname SetNameR GET

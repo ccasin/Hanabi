@@ -1,7 +1,8 @@
 Default: &defaults
   host: "*4" # any IPv4 host
   port: 3000
-  approot: "http://localhost:3000"
+  #approot: "http://localhost:3000"
+  approot: "http://158.130.107.230:3000"
   copyright: Insert copyright statement here
   #analytics: UA-YOURCODE
 
@@ -15,5 +16,5 @@ Staging:
   <<: *defaults
 
 Production:
-  #approot: "http://www.example.com"
+  approot: "http://158.130.109.212:3000"
   <<: *defaults

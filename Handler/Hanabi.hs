@@ -133,8 +133,8 @@ postUnjoinHanabiR = do
   res <- requireGameTransaction (\gid game ->
       let players = gamePlayers game in
       case (gameActive game, length players <= 1) of
-        (True, _    ) -> return UnjoinFail
-        (False,True ) -> -- unjoin is only for games that haven't started
+        (True, _    ) -> return UnjoinFail -- unjoin is only for games that haven't started
+        (False,True ) -> 
           do delete gid 
              return $ UnjoinEndGame gid
         (False,False) ->
@@ -142,7 +142,8 @@ postUnjoinHanabiR = do
              return UnjoinSuccess
     )
   case res of
-    UnjoinSuccess     -> redirect HanabiLobbyR -- XXX the lobby should update
+    UnjoinSuccess     -> do deleteSession sgameid
+                            redirect HanabiLobbyR -- XXX the lobby should update
     UnjoinFail        -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
     UnjoinEndGame gid -> undefined --XXX
 

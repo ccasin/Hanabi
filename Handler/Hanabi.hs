@@ -82,7 +82,8 @@ requireGame = do
     Just gid -> do 
       mgame <- runDB $ get gid
       case mgame of
-        Nothing -> redirect HanabiLobbyR
+        Nothing -> do deleteSession sgameid
+                      redirect HanabiLobbyR
         Just g -> return (gid,g)
 
 requireGameTransaction :: (GameId -> Game -> YesodDB App App a) -> Handler a
@@ -149,7 +150,7 @@ postUnjoinHanabiR = do
 data PlayerListEvent = PLEJoin | PLELeave
 $(deriveJSON id ''PlayerListEvent)
 
-data PlayerListMsg = PlayerListMsg {plmEvent :: PlayerListEvent,
+data PlayerListMsg = PlayerListMsg {plmEType :: PlayerListEvent,
                                     plmPlayer :: Text,
                                     plmPlayers :: [Text]}
 $(deriveJSON (drop 3) ''PlayerListMsg)
@@ -200,7 +201,9 @@ getStartHanabiR = do
 playerListWidget :: String -> GameId -> Widget
 playerListWidget initPlayers gid =
   do playerList <- lift newIdent
+     mbox <- lift newIdent
      [whamlet|
+       <p id=#{mbox}>
        <p id=#{playerList}>#{initPlayers}
        
        <form method=post action=@{UnjoinHanabiR}>
@@ -208,13 +211,23 @@ playerListWidget initPlayers gid =
      |]
      toWidgetBody [julius|
         var list = document.getElementById(#{toJSON playerList});
+        var mbox = document.getElementById(#{toJSON mbox});
         var src = new EventSource("@{GameEventReceiveR gid}");
         src.onmessage = function(msg) {
           var event = JSON.parse(msg.data);
-          for (i=0;i<event.Players.length;i++) {
-            if (i > 0) {list.innerHTML += ", ";};
-            list.innerHTML = event.Players[i];
+          var etype = event.EType;
+          if ("PLEJoin" in etype) {
+            mbox.innerHTML = event.Player + " joined the game.";
+          } else if ("PLELeft" in etype) {
+            mbox.innerHTML = event.Player + " left the game.";
           }
+
+          var listHTML = "";
+          for (i=0;i<event.Players.length;i++) {
+            if (i > 0) {listHTML += ", ";};
+            listHTML += event.Players[i];
+          }
+          list.innerHTML = listHTML;
         }; |]
 
 getPlayHanabiR :: Handler RepHtml
@@ -272,7 +285,7 @@ getHanabiLobbyR =
     prettyNames :: Game -> String
     prettyNames g = intercalate ", " $ map (\(Player n _) -> unpack n) $ gamePlayers g
 
-getGameEventReceiveR :: GameId -> Handler RepHtml
+getGameEventReceiveR :: GameId -> Handler ()
 getGameEventReceiveR gid = do
   chan0 <- getChannel gid
   chan <- liftIO $ dupChan chan0

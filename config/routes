@@ -6,12 +6,13 @@
 
 / HomeR GET POST
 
-/hanabilobby               HanabiLobbyR       GET
-/createhanabi              CreateHanabiR      POST
-/joinhanabi/#GameId        JoinHanabiR        POST
-/unjoinhanabi              UnjoinHanabiR      POST
-/playhanabi                PlayHanabiR        GET
-/starthanabi               StartHanabiR       GET
-/gameeventreceive/#GameId  GameEventReceiveR  GET
+/hanabilobby               HanabiLobbyR        GET
+/createhanabi              CreateHanabiR       POST
+/joinhanabi/#GameId        JoinHanabiR         POST
+/unjoinhanabi              UnjoinHanabiR       POST
+/playhanabi                PlayHanabiR         GET
+/starthanabi               StartHanabiR        GET
+/gameeventreceive/#GameId  GameEventReceiveR   GET
+/lobbyeventreceive         LobbyEventReceiveR  GET
 
 /setname SetNameR GET

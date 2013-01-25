@@ -17,6 +17,8 @@ import Database.Persist.GenericSql (runMigration)
 import Network.HTTP.Conduit (newManager, def)
 
 import Data.IORef (newIORef)
+import Control.Concurrent.Chan (newChan)
+
 
 -- Import all relevant handler modules here.
 -- Don't forget to add new modules to your cabal file!
@@ -51,7 +53,8 @@ makeFoundation conf = do
     p <- Database.Persist.Store.createPoolConfig (dbconf :: Settings.PersistConfig)
     Database.Persist.Store.runPool dbconf (runMigration migrateAll) p
     chans <- liftIO $ newIORef []
-    return $ App conf s p manager dbconf chans
+    lchan <- newChan
+    return $ App conf s p manager dbconf lchan chans
 
 -- for yesod devel
 getApplicationDev :: IO (Int, Application)

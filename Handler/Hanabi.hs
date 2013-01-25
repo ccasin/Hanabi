@@ -1,4 +1,3 @@
-
 module Handler.Hanabi where
 
 import Import
@@ -106,6 +105,31 @@ nameForm = renderDivs $ areq textField "Please pick a name" Nothing
 --------------------------
 --------------------------
 
+--------------------------
+----- EVENTS -------------
+
+data GameListEvent = GLEAddGame   | GLEDeleteGame
+                   | GLEUpdatePlayers
+$(deriveJSON id ''GameListEvent)
+
+data GameListMsg = GameListMsg {glmEType   :: GameListEvent,
+                                glmGID     :: Text,
+                                glmPlayers :: [Text]}
+$(deriveJSON (drop 3) ''GameListMsg)
+
+
+
+data PlayerListEvent = PLEJoin | PLELeave
+$(deriveJSON id ''PlayerListEvent)
+
+data PlayerListMsg = PlayerListMsg {plmEType :: PlayerListEvent,
+                                    plmPlayer :: Text,
+                                    plmPlayers :: [Text]}
+$(deriveJSON (drop 3) ''PlayerListMsg)
+--------------------------
+--------------------------
+
+
 
 getSetNameR :: Handler ()
 getSetNameR = 
@@ -130,6 +154,7 @@ data UnjoinResult = UnjoinSuccess | UnjoinFail | UnjoinEndGame GameId
 postUnjoinHanabiR :: Handler ()
 postUnjoinHanabiR = do
   nm  <- requireName
+  lobbyChan <- liftM lobbyChannel getYesod
   res <- requireGameTransaction (\gid game ->
       let players = gamePlayers game in
       case (gameActive game, length players <= 1) of
@@ -145,16 +170,10 @@ postUnjoinHanabiR = do
     UnjoinSuccess     -> do deleteSession sgameid
                             redirect HanabiLobbyR -- XXX the lobby should update
     UnjoinFail        -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
-    UnjoinEndGame gid -> undefined --XXX
-
-
-data PlayerListEvent = PLEJoin | PLELeave
-$(deriveJSON id ''PlayerListEvent)
-
-data PlayerListMsg = PlayerListMsg {plmEType :: PlayerListEvent,
-                                    plmPlayer :: Text,
-                                    plmPlayers :: [Text]}
-$(deriveJSON (drop 3) ''PlayerListMsg)
+    UnjoinEndGame gid ->
+      do liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $ 
+              fromLazyByteString $ encode (GameListMsg GLEDeleteGame ((pack . show . keyToInt) gid) [])
+         redirect HanabiLobbyR
 
 data JoinResult = JSuccess [Text]
                 | JFailGameGone | JFailGameStarted | JFailGameFull
@@ -179,7 +198,7 @@ postJoinHanabiR gid = do
          liftIO $ writeChan chan $ ServerEvent Nothing Nothing $ return $ 
               fromLazyByteString $ encode (PlayerListMsg PLEJoin nm nms)
          redirect PlayHanabiR
-    JFailGameGone ->
+    JFailGameGone -> -- XXX use somethign better than setmessage
       do setMessage 
            "Sorry, that game was cancelled by its creator.  Please pick another."
          redirect HanabiLobbyR
@@ -244,6 +263,39 @@ getPlayHanabiR = do
     -- Still need to add back start game button
     True -> defaultLayout [whamlet|Well, the game started.  But I haven't implemented that yet.  Bummer.|]
 
+gameListWidget :: [Entity Game] -> Widget
+gameListWidget games = do
+  do [whamlet|
+       $if null games
+         <p>There are no games waiting for players.
+       $else 
+         <p>You can join a game or create a new one.  These games haven't started yet:
+            
+         <ul>
+           $forall Entity gid g <- games
+             <li id="#{keyToInt gid}">
+               <form method=post action=@{JoinHanabiR gid}>
+                  <input type=submit value="Game #{keyToInt gid}">
+               #{prettyNames g}
+       |]
+     toWidgetBody [julius|
+        var src = new EventSource("@{LobbyEventReceiveR}");
+        src.onmessage = function(msg) {
+          var event = JSON.parse(msg.data);
+          var etype = event.EType;
+          if ("GLEAddGame" in etype) {
+            // XXX unimplemented
+          } else if ("GLEDeleteGame" in etype) {
+            $("#"+event.GID).fadeOut();
+          } else if ("GLEUpdatePlayers" in etype) {
+            // XXX unimplemented
+          }
+        }; |]
+
+  where
+    prettyNames :: Game -> String
+    prettyNames g = intercalate ", " $ map (\(Player n _) -> unpack n) $ gamePlayers g
+
 
 getHanabiLobbyR :: Handler RepHtml
 getHanabiLobbyR =
@@ -265,30 +317,25 @@ getHanabiLobbyR =
          games <- runDB $ selectList [GameActive ==. False] []
          defaultLayout [whamlet|
              <p>Welcome to Hanabi, #{nm}
-
-             $if null games
-               <p>There are no games waiting for players.
-             $else 
-               <p>You can join a game or create a new one.  These games haven't started yet:
-                  
-               <ul>
-                 $forall Entity gid g <- games
-                   <li>
-                     <form method=post action=@{JoinHanabiR gid}>
-                        <input type=submit value="Game #{keyToInt gid}">
-                     #{prettyNames g}
+                        
+             ^{gameListWidget games}
 
              <p>
                <form method=post action=@{CreateHanabiR}>
                   <input type=submit value="Create a new game">
           |]
-  where
-    prettyNames :: Game -> String
-    prettyNames g = intercalate ", " $ map (\(Player n _) -> unpack n) $ gamePlayers g
 
 getGameEventReceiveR :: GameId -> Handler ()
 getGameEventReceiveR gid = do
   chan0 <- getChannel gid
+  chan <- liftIO $ dupChan chan0
+  req <- waiRequest
+  res <- lift $ eventSourceAppChan chan req
+  sendWaiResponse res
+
+getLobbyEventReceiveR :: Handler ()
+getLobbyEventReceiveR = do
+  chan0 <- liftM lobbyChannel getYesod
   chan <- liftIO $ dupChan chan0
   req <- waiRequest
   res <- lift $ eventSourceAppChan chan req

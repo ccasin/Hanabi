@@ -23,6 +23,7 @@ import Text.Hamlet (hamletFile)
 import Control.Concurrent.Chan (Chan)
 import Network.Wai.EventSource (ServerEvent)
 import Data.IORef
+import Data.Text
 
 -- | The site argument for your application. This can be a good place to
 -- keep settings and values requiring initialization before your application
@@ -35,7 +36,7 @@ data App = App
     , httpManager :: Manager
     , persistConfig :: Settings.PersistConfig
     , lobbyChannel :: Chan ServerEvent
-    , gameChannels :: IORef [(GameId,Chan ServerEvent)]
+    , gameChannels :: IORef [(Text,Chan ServerEvent)]
     }
 
 -- Set up i18n messages. See the message folder.

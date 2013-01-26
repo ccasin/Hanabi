@@ -51,7 +51,12 @@ makeFoundation conf = do
               Database.Persist.Store.loadConfig >>=
               Database.Persist.Store.applyEnv
     p <- Database.Persist.Store.createPoolConfig (dbconf :: Settings.PersistConfig)
-    Database.Persist.Store.runPool dbconf (runMigration migrateAll) p
+    Database.Persist.Store.runPool dbconf 
+        (do runMigration migrateAll
+            gms <- selectList ([] :: [Filter Game]) []
+            mapM_ (\(Entity gid _) -> delete gid) gms
+          )
+        p
     chans <- liftIO $ newIORef []
     lchan <- newChan
     return $ App conf s p manager dbconf lchan chans

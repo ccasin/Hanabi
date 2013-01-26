@@ -12,7 +12,7 @@
 /unjoinhanabi              UnjoinHanabiR       POST
 /playhanabi                PlayHanabiR         GET
 /starthanabi               StartHanabiR        GET
-/gameeventreceive/#GameId  GameEventReceiveR   GET
+/gameeventreceive/#Text    GameEventReceiveR   GET
 /lobbyeventreceive         LobbyEventReceiveR  GET
 
 /setname SetNameR GET

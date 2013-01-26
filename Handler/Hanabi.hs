@@ -36,20 +36,23 @@ keyToInt gid =
 -----------------------------
 ------ The channel map ------
 
-getChannel :: GameId -> Handler (Chan ServerEvent)
-getChannel gid =
+getChannel :: Text -> Handler (Chan ServerEvent)
+getChannel guid =
   do iochans <- liftM gameChannels getYesod
      chans <- liftIO $ readIORef iochans
-     case lookup gid chans of
+     case lookup guid chans of
        Just chan -> return chan
        Nothing   -> notFound
            -- XXX make a new channel?  remove game from DB?
 
-newChannel :: GameId -> Handler ()
-newChannel gid =
-    do iochans <- liftM gameChannels getYesod
-       newc    <- liftIO newChan
-       liftIO $ modifyIORef iochans ((gid,newc):)
+newChannel :: Handler Text
+newChannel =
+  do uniqueid <- newIdent
+     iochans  <- liftM gameChannels getYesod
+     newc     <- liftIO newChan
+     liftIO $ modifyIORef iochans ((uniqueid,newc):)
+     return uniqueid
+
 
 --------------------------
 ------ Session stuff -----
@@ -113,7 +116,7 @@ data GameListEvent = GLEAddGame   | GLEDeleteGame
 $(deriveJSON id ''GameListEvent)
 
 data GameListMsg = GameListMsg {glmEType   :: GameListEvent,
-                                glmGID     :: Text,
+                                glmGUID     :: Text,
                                 glmPlayers :: [Text]}
 $(deriveJSON (drop 3) ''GameListMsg)
 
@@ -144,12 +147,12 @@ getSetNameR =
 postCreateHanabiR :: Handler ()
 postCreateHanabiR = do
   nm     <- requireName
-  gameId <- runDB $ insert $ Game False [Player nm []]
+  uid    <- newChannel
+  gameId <- runDB $ insert $ Game False uid [Player nm []]
   setSession sgameid (pack $ show gameId)
-  newChannel gameId
   redirect PlayHanabiR
 
-data UnjoinResult = UnjoinSuccess | UnjoinFail | UnjoinEndGame GameId
+data UnjoinResult = UnjoinSuccess | UnjoinFail | UnjoinEndGame Text
 
 postUnjoinHanabiR :: Handler ()
 postUnjoinHanabiR = do
@@ -161,21 +164,21 @@ postUnjoinHanabiR = do
         (True, _    ) -> return UnjoinFail -- unjoin is only for games that haven't started
         (False,True ) -> 
           do delete gid 
-             return $ UnjoinEndGame gid
+             return $ UnjoinEndGame (gameUid game)
         (False,False) ->
           do update gid [GamePlayers =. filter (\(Player nm' _) -> nm /= nm') players]
              return UnjoinSuccess
     )
   case res of
-    UnjoinSuccess     -> do deleteSession sgameid
-                            redirect HanabiLobbyR -- XXX the lobby should update
-    UnjoinFail        -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
-    UnjoinEndGame gid ->
+    UnjoinSuccess      -> do deleteSession sgameid
+                             redirect HanabiLobbyR -- XXX the lobby should update
+    UnjoinFail         -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
+    UnjoinEndGame guid ->
       do liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $ 
-              fromLazyByteString $ encode (GameListMsg GLEDeleteGame ((pack . show . keyToInt) gid) [])
+              fromLazyByteString $ encode (GameListMsg GLEDeleteGame guid [])
          redirect HanabiLobbyR
 
-data JoinResult = JSuccess [Text]
+data JoinResult = JSuccess (Text,[Text])
                 | JFailGameGone | JFailGameStarted | JFailGameFull
 --- XXX CHECK IF PLAYER IS ALREADY IN GAME TO MAKE IDEMPOTENT             
    
@@ -187,13 +190,13 @@ postJoinHanabiR gid = do
     case mgame of
       Nothing -> return JFailGameGone
       Just (Game {gameActive=True             }) -> return JFailGameStarted
-      Just (Game {gameActive=False,gamePlayers}) ->
+      Just (Game {gameActive=False,gamePlayers,gameUid}) ->
         if (length gamePlayers >= 5) then return JFailGameFull
            else do update gid [GamePlayers =. ((Player nm []):gamePlayers)]
-                   return $ JSuccess $ nm : map (\(Player nm' _) -> nm') gamePlayers
+                   return $ JSuccess (gameUid, nm : map (\(Player nm' _) -> nm') gamePlayers)
   case res of
-    JSuccess nms -> 
-      do chan <- getChannel gid
+    JSuccess (uid,nms) -> 
+      do chan <- getChannel uid
          setSession sgameid (pack $ show gid)
          liftIO $ writeChan chan $ ServerEvent Nothing Nothing $ return $ 
               fromLazyByteString $ encode (PlayerListMsg PLEJoin nm nms)
@@ -218,8 +221,8 @@ getStartHanabiR = do
   redirect PlayHanabiR
 
 
-playerListWidget :: String -> GameId -> Widget
-playerListWidget initPlayers gid =
+playerListWidget :: String -> Text -> Widget
+playerListWidget initPlayers guid =
   do playerList <- lift newIdent
      mbox <- lift newIdent
      [whamlet|
@@ -232,7 +235,7 @@ playerListWidget initPlayers gid =
      toWidgetBody [julius|
         var list = document.getElementById(#{toJSON playerList});
         var mbox = document.getElementById(#{toJSON mbox});
-        var src = new EventSource("@{GameEventReceiveR gid}");
+        var src = new EventSource("@{GameEventReceiveR guid}");
         src.onmessage = function(msg) {
           var event = JSON.parse(msg.data);
           var etype = event.EType;
@@ -252,13 +255,13 @@ playerListWidget initPlayers gid =
 
 getPlayHanabiR :: Handler RepHtml
 getPlayHanabiR = do
-  (gid,game) <- requireGame
+  (_,game) <- requireGame
   let names = intercalate ", " $ map (\(Player n _) -> unpack n) $ gamePlayers game
   case gameActive game of
     False -> defaultLayout [whamlet|
         <p> This game hasn't started yet.  These players have joined:
         
-        ^{playerListWidget names gid}
+        ^{playerListWidget names $ gameUid game}
       |]
     -- Still need to add back start game button
     True -> defaultLayout [whamlet|Well, the game started.  But I haven't implemented that yet.  Bummer.|]
@@ -273,7 +276,7 @@ gameListWidget games = do
             
          <ul>
            $forall Entity gid g <- games
-             <li id="#{keyToInt gid}">
+             <li id="#{gameUid g}">
                <form method=post action=@{JoinHanabiR gid}>
                   <input type=submit value="Game #{keyToInt gid}">
                #{prettyNames g}
@@ -286,7 +289,7 @@ gameListWidget games = do
           if ("GLEAddGame" in etype) {
             // XXX unimplemented
           } else if ("GLEDeleteGame" in etype) {
-            $("#"+event.GID).fadeOut();
+            $("#"+event.GUID).fadeOut();
           } else if ("GLEUpdatePlayers" in etype) {
             // XXX unimplemented
           }
@@ -325,9 +328,9 @@ getHanabiLobbyR =
                   <input type=submit value="Create a new game">
           |]
 
-getGameEventReceiveR :: GameId -> Handler ()
-getGameEventReceiveR gid = do
-  chan0 <- getChannel gid
+getGameEventReceiveR :: Text -> Handler ()
+getGameEventReceiveR guid = do
+  chan0 <- getChannel guid
   chan <- liftIO $ dupChan chan0
   req <- waiRequest
   res <- lift $ eventSourceAppChan chan req

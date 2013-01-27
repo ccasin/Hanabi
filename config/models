@@ -10,6 +10,7 @@ Email
 Game
   active  Bool
   uid     Text
+  UniqueUid uid
   players [Player]
   
 Completed

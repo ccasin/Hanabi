@@ -8,7 +8,7 @@
 
 /hanabilobby               HanabiLobbyR        GET
 /createhanabi              CreateHanabiR       POST
-/joinhanabi/#GameId        JoinHanabiR         POST
+/joinhanabi/#Text          JoinHanabiR         POST
 /unjoinhanabi              UnjoinHanabiR       POST
 /playhanabi                PlayHanabiR         GET
 /starthanabi               StartHanabiR        GET

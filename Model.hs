@@ -2,7 +2,7 @@ module Model where
 
 import Prelude
 import Yesod
-import Data.Text (Text,pack,unpack,append)
+import Data.Text (Text,pack,unpack,append,intercalate)
 import Safe (readMay)
 
 import Database.Persist.Quasi
@@ -49,5 +49,12 @@ data Player = Player Text [(Card,Knowledge)]
   deriving (Show,Read,Eq)
 derivePersistField "Player"
 
+playerName :: Player -> Text
+playerName (Player nm _) = nm
+
+
 share [mkPersist sqlSettings, mkMigrate "migrateAll"]
     $(persistFileWith lowerCaseSettings "config/models")
+
+prettyNameList :: Game -> Text
+prettyNameList g = intercalate ", " $ map (\(Player n _) -> n) $ gamePlayers g

@@ -4,7 +4,7 @@ import Import
 
 import Data.Maybe (isJust)
 import Data.IORef
-import Data.Text (pack,append,intercalate)
+import Data.Text (pack,append)
 
 import Data.Aeson
 import qualified Data.Aeson as J (Value)
@@ -22,7 +22,6 @@ import System.Random (randomRIO)
 ---- TODO
 ----
 ---- - game implementation...
-
 
 keyToInt :: GameId -> Int
 keyToInt gid = 
@@ -117,7 +116,7 @@ $(deriveJSON id ''GameListEvent)
 data GameListMsg = GameListMsg {glmEType   :: GameListEvent,
                                 glmGID     :: Int,
                                 glmGUID    :: Text,
-                                glmPlayers :: Text}
+                                glmPlayers :: [Player]}
 $(deriveJSON (drop 3) ''GameListMsg)
 
 
@@ -131,7 +130,7 @@ pleLeave = toJSON $ encode PLELeave
 
 data PlayerListMsg = PlayerListMsg {plmEType :: PlayerListEvent,
                                     plmPlayer :: Text,
-                                    plmPlayers :: [Text]}
+                                    plmPlayers :: [Player]}
 $(deriveJSON (drop 3) ''PlayerListMsg)
 --------------------------
 --------------------------
@@ -151,15 +150,16 @@ postCreateHanabiR :: Handler ()
 postCreateHanabiR = do
   nm     <- requireName
   guid   <- newChannel
-  gid    <- runDB $ insert $ Game False guid [Player nm []]
+  let newPlayer = Player nm []
+  gid    <- runDB $ insert $ Game False guid [newPlayer]
   setSession sgameid guid
   lobbyChan <- liftM lobbyChannel getYesod
   liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $
      fromLazyByteString $ encode (GameListMsg GLEAddGame (keyToInt gid)
-                                              guid nm)
+                                              guid [newPlayer])
   redirect PlayHanabiR
 
-data UnjoinResult = UnjoinSuccess Int Text Text | UnjoinFail | UnjoinEndGame Text Int
+data UnjoinResult = UnjoinSuccess Int Text [Player] | UnjoinFail | UnjoinEndGame Text Int
 
 postUnjoinHanabiR :: Handler ()
 postUnjoinHanabiR = do
@@ -175,8 +175,7 @@ postUnjoinHanabiR = do
         (False,False) ->
           let newPlayers = filter (\p -> nm /= playerName p) players in
           do update gid [GamePlayers =. newPlayers]
-             return (UnjoinSuccess (keyToInt gid) (gameUid game)
-                                   (intercalate ", " (map playerName newPlayers)))
+             return (UnjoinSuccess (keyToInt gid) (gameUid game) newPlayers)
     )
   case res of
     UnjoinSuccess gid guid ps -> 
@@ -187,7 +186,7 @@ postUnjoinHanabiR = do
          gchan <- getChannel guid
          liftIO $ writeChan gchan $ 
             ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
-               encode (PlayerListMsg PLELeave nm [ps]) -- XXX ugly, unify whether these messages pass lists or text
+               encode (PlayerListMsg PLELeave nm ps)
          redirect HanabiLobbyR
     UnjoinFail         -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
     UnjoinEndGame guid gid ->
@@ -195,10 +194,10 @@ postUnjoinHanabiR = do
          gamesLeft <- liftM null $ runDB $ selectList [GameActive ==. False] []
          liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $ 
               fromLazyByteString 
-              (encode (GameListMsg (GLEDeleteGame gamesLeft) gid guid ""))
+              (encode (GameListMsg (GLEDeleteGame gamesLeft) gid guid []))
          redirect HanabiLobbyR
 
-data JoinResult = JSuccess Int [Text]
+data JoinResult = JSuccess Int [Player]
                 | JFailGameGone | JFailGameStarted | JFailGameFull
 --- XXX CHECK IF PLAYER IS ALREADY IN GAME TO MAKE IDEMPOTENT             
    
@@ -213,20 +212,19 @@ postJoinHanabiR guid = do
         return JFailGameStarted
       Just (Entity gid (Game {gameActive=False,gamePlayers})) ->
         if (length gamePlayers >= 5) then return JFailGameFull
-           else do update gid [GamePlayers =. ((Player nm []):gamePlayers)]
-                   return $ JSuccess (keyToInt gid)
-                                     (nm : map playerName gamePlayers)
+           else let newPlayers = (Player nm []):gamePlayers in
+                do update gid [GamePlayers =. newPlayers]
+                   return $ JSuccess (keyToInt gid) newPlayers
   case res of
-    JSuccess gid nms -> 
+    JSuccess gid ps -> 
       do gchan <- getChannel guid
          lchan <- liftM lobbyChannel getYesod
          setSession sgameid guid
          liftIO $ writeChan gchan $ ServerEvent Nothing Nothing $ return $ 
-               fromLazyByteString $ encode (PlayerListMsg PLEJoin nm nms)
+               fromLazyByteString $ encode (PlayerListMsg PLEJoin nm ps)
          liftIO $ writeChan lchan $ ServerEvent Nothing Nothing $ return $ 
                fromLazyByteString $ 
-               encode (GameListMsg GLEUpdatePlayers gid guid
-                                   (intercalate ", " nms))
+               encode (GameListMsg GLEUpdatePlayers gid guid ps)
          redirect PlayHanabiR
     JFailGameGone -> -- XXX use somethign better than setmessage
       do setMessage 
@@ -272,12 +270,7 @@ playerListWidget initPlayers guid =
             mbox.innerHTML = event.Player + " left the game.";
           }
 
-          var listHTML = "";
-          for (i=0;i<event.Players.length;i++) {
-            if (i > 0) {listHTML += ", ";};
-            listHTML += event.Players[i];
-          }
-          list.innerHTML = listHTML;
+          list.innerHTML = displayPlayerList(event.Players);
         }; |]
 
 getPlayHanabiR :: Handler RepHtml
@@ -343,7 +336,7 @@ gameListWidget games = do
             $(newbutton).attr('value','Game '+event.GID);
             
             $(newp).attr('class',#{toJSON gplayersC});
-            $(newp).append(event.Players);
+            $(newp).append(displayPlayerList(event.Players));
 
             $(newform).append(newbutton);
             $(newli).append(newform).append(newp);
@@ -356,7 +349,8 @@ gameListWidget games = do
             };
             $("#"+event.GUID).fadeOut();
           } else if ("GLEUpdatePlayers" in etype) {
-            $("#"+event.GUID+">."+#{toJSON gplayersC}).text(event.Players);
+            $("#"+event.GUID+">."+#{toJSON gplayersC}).
+                 text(displayPlayerList(event.Players));
           }
         }; |]
 

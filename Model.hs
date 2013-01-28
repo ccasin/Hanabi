@@ -8,6 +8,7 @@ import Safe (readMay)
 import Database.Persist.Quasi
 import Database.Persist.Store
 
+import Data.Aeson.TH
 
 -- You can define all of your database entities in the entities file.
 -- You can find more information on persistent and how to declare entities
@@ -17,17 +18,21 @@ import Database.Persist.Store
 data Color = Red | Blue | Green | Yellow | Black
     deriving (Show,Read,Eq)
 derivePersistField "Color"
+$(deriveJSON id ''Color)
 
 data Rank  = One | Two | Three | Four | Five
     deriving (Show,Read,Eq)
 derivePersistField "Rank"
+$(deriveJSON id ''Rank)
 
-data Card  = Card Color Rank
+data Card  = Card {cardColor :: Color, cardRank :: Rank}
     deriving (Show,Read,Eq)
 derivePersistField "Card"
+$(deriveJSON (drop 4) ''Card)
 
 data Fact a = Mystery | Isnt [a] | Is a
     deriving (Show,Read,Eq)
+$(deriveJSON id ''Fact)
 
 instance (Show a,Read a) => PersistField (Fact a) where
     toPersistValue f = PersistText (pack $ show f)
@@ -44,14 +49,13 @@ instance (Show a,Read a) => PersistField (Fact a) where
 data Knowledge = Knowledge (Fact Color) (Fact Rank)
   deriving (Show,Read,Eq)
 derivePersistField "Knowledge"
+$(deriveJSON id ''Knowledge)
 
-data Player = Player Text [(Card,Knowledge)]
+data Player = Player {playerName :: Text,
+                      playerHand :: [(Card,Knowledge)]}
   deriving (Show,Read,Eq)
 derivePersistField "Player"
-
-playerName :: Player -> Text
-playerName (Player nm _) = nm
-
+$(deriveJSON (drop 6) ''Player)
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"]
     $(persistFileWith lowerCaseSettings "config/models")

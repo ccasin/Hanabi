@@ -240,6 +240,7 @@ postJoinHanabiR guid = do
 
 getStartHanabiR :: Handler ()
 getStartHanabiR = do 
+  -- XXX send event message to all players to start game
   requireGameTransaction (\gid _ -> 
     --- XXX also need to shuffle and deal
     update gid [GameActive =. True])
@@ -254,9 +255,17 @@ playerListWidget initPlayers guid =
        <p id=#{mbox}>
        <p id=#{playerList}>#{initPlayers}
        
-       <form method=post action=@{UnjoinHanabiR}>
-          <input type=submit value="Leave this game">
-     |]
+       <table>
+         <tr>
+           <td>
+             <form method=get action=@{StartHanabiR}>
+               <input type=submit value="Start the game">
+           <td>
+             <form method=post action=@{UnjoinHanabiR}>
+               <input type=submit value="Leave the game">
+                       
+     |] -- XXX only "leader" should be allowed to start
+        -- XXX grey out start box
      toWidgetBody [julius|
         var list = document.getElementById(#{toJSON playerList});
         var mbox = document.getElementById(#{toJSON mbox});

@@ -4,8 +4,8 @@ import Prelude
 import Yesod
 import Yesod.Static
 import Yesod.Auth
-import Yesod.Auth.BrowserId
 import Yesod.Auth.GoogleEmail
+import Yesod.Auth.Dummy
 import Yesod.Default.Config
 import Yesod.Default.Util (addStaticContentExternal)
 import Network.HTTP.Conduit (Manager)
@@ -24,6 +24,8 @@ import Control.Concurrent.Chan (Chan)
 import Network.Wai.EventSource (ServerEvent)
 import Data.IORef
 import Data.Text
+import System.Random (randomRIO)
+import Control.Monad (liftM)
 
 -- | The site argument for your application. This can be a good place to
 -- keep settings and values requiring initialization before your application
@@ -130,19 +132,23 @@ instance YesodAuth App where
     type AuthId App = UserId
 
     -- Where to send a user after successful login
-    loginDest _ = HomeR
+    loginDest _ = HanabiLobbyR
     -- Where to send a user after logout
-    logoutDest _ = HomeR
+    logoutDest _ = HanabiLobbyR
 
     getAuthId creds = runDB $ do
-        x <- getBy $ UniqueUser $ credsIdent creds
+        x <- getBy $ UniqueCreds (credsPlugin creds) (credsIdent creds)
         case x of
-            Just (Entity uid _) -> return $ Just uid
-            Nothing -> do
-                fmap Just $ insert $ User (credsIdent creds) Nothing
+          Just (Entity uid _) -> return $ Just uid
+          Nothing -> 
+             case credsPlugin creds of
+               "dummy" -> do uniqueid <- liftIO $ liftM (pack . show) 
+                                                $ randomRIO (1 :: Int,1000000000)
+                             fmap Just $ insert $ User "dummy" uniqueid (credsIdent creds)
+               p -> do fmap Just $ insert $ User p (credsIdent creds) ""
 
     -- You can add other plugins like BrowserID, email or OAuth here
-    authPlugins _ = [authBrowserId, authGoogleEmail]
+    authPlugins _ = [authGoogleEmail, authDummy]
 
     authHttpManager = httpManager
 

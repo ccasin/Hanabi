@@ -15,4 +15,4 @@
 /gameeventreceive/#Text    GameEventReceiveR   GET
 /lobbyeventreceive         LobbyEventReceiveR  GET
 
-/setname SetNameR GET
+/setname SetNameR GET POST

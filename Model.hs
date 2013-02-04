@@ -61,4 +61,4 @@ share [mkPersist sqlSettings, mkMigrate "migrateAll"]
     $(persistFileWith lowerCaseSettings "config/models")
 
 prettyNameList :: Game -> Text
-prettyNameList g = intercalate ", " $ map (\(Player n _) -> n) $ gamePlayers g
+prettyNameList g = intercalate ", " $ map playerName $ gamePlayers g

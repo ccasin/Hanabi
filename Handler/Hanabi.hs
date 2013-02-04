@@ -5,21 +5,25 @@ import Import
 import Data.Maybe (isJust)
 import Data.IORef
 import Data.Text (pack,append)
+import qualified Data.Text as T (concat)
 
 import Data.Aeson
 import qualified Data.Aeson as J (Value)
 import Data.Aeson.TH
 
-import Control.Monad (liftM,when)
+import Control.Monad (liftM,when,unless)
 import Control.Concurrent.Chan
 
 import Blaze.ByteString.Builder (fromLazyByteString)
 
 import Network.Wai.EventSource
 import System.Random (randomRIO)
+import Yesod.Auth
 
 ----  
 ---- TODO
+----
+---- FIX LEADER NONSENSE
 ----
 ---- - game implementation...
 
@@ -57,9 +61,6 @@ newChannel =
 
 --------------------------
 ------ Session stuff -----
-sname :: Text
-sname = "name"
-
 sgameid :: Text
 sgameid = "gameid" 
 
@@ -69,10 +70,10 @@ lookupGame = lookupSession sgameid
 
 requireName :: Handler Text
 requireName = do
-  mname <- lookupSession sname
-  case mname of
-    Nothing -> redirect HanabiLobbyR
-    Just n -> return n
+  Entity _ user <- requireAuth
+  case userName user of
+    "" -> redirect SetNameR
+    nm -> return nm
 
 requireGame :: Handler Game
 requireGame = do
@@ -102,7 +103,7 @@ requireGameTransaction trans = do
     Just g -> return g
 
 nameForm :: Form Text
-nameForm = renderDivs $ areq textField "Please pick a name" Nothing
+nameForm = renderDivs $ areq textField "" Nothing
 --------------------------
 --------------------------
 
@@ -114,7 +115,6 @@ data GameListEvent = GLEAddGame   | GLEDeleteGame Bool -- Is this the last game?
 $(deriveJSON id ''GameListEvent)
 
 data GameListMsg = GameListMsg {glmEType   :: GameListEvent,
-                                glmGID     :: Int,
                                 glmGUID    :: Text,
                                 glmPlayers :: [Player]}
 $(deriveJSON (drop 3) ''GameListMsg)
@@ -135,31 +135,54 @@ $(deriveJSON (drop 3) ''PlayerListMsg)
 --------------------------
 --------------------------
 
+getSetNameR :: Handler RepHtml
+getSetNameR =
+  do Entity _ user <- requireAuth
+     (widget,enctype) <- generateFormPost nameForm
+     defaultLayout [whamlet|
+       <p>Welcome to Hanabi <b>#{userCredID user}</b>.
+            
 
-getSetNameR :: Handler ()
-getSetNameR = 
-  do mname <- lookupSession sname
-     when (isJust mname) $ redirect HanabiLobbyR
-     ((result, _), _) <- runFormGet nameForm
+       <p>Please chose a nickname.  This will be visible to other players.
+                 
+       <form method=post action=@{SetNameR} enctype=#{enctype}>
+          ^{widget}
+          <input type=submit value="Set nickname">
+     |]
+
+postSetNameR :: Handler ()
+postSetNameR =
+  do uid <- requireAuthId
+     ((result, _), _) <- runFormPost nameForm
      case result of
-       FormSuccess nm -> setSession sname nm
-       _ -> setMessage "Please enter a valid name."
-     redirect HanabiLobbyR
+       FormSuccess nm -> do 
+         success <- runDB $ do 
+           taken <- liftM isJust $ getBy $ UniqueName nm
+           unless taken $ update uid [UserName =. nm]
+           return $ not taken
+         if success then redirect HanabiLobbyR
+                    else do setMessage $ toHtml $
+                                T.concat ["Sorry, ",nm," is taken."]
+                            redirect SetNameR
+       _ -> do setMessage "Please Enter a valid name."
+               redirect SetNameR
 
 postCreateHanabiR :: Handler ()
 postCreateHanabiR = do
   nm     <- requireName
   guid   <- newChannel
   let newPlayer = Player nm []
-  gid    <- runDB $ insert $ Game False guid [newPlayer]
+  _      <- runDB $ insert $ Game False guid (playerName newPlayer) [newPlayer]
   setSession sgameid guid
   lobbyChan <- liftM lobbyChannel getYesod
   liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $
-     fromLazyByteString $ encode (GameListMsg GLEAddGame (keyToInt gid)
-                                              guid [newPlayer])
+     fromLazyByteString $ encode (GameListMsg GLEAddGame guid [newPlayer])
   redirect PlayHanabiR
 
-data UnjoinResult = UnjoinSuccess Int Text [Player] | UnjoinFail | UnjoinEndGame Text Int
+data UnjoinResult =
+    UnjoinSuccess {guid :: Text, players :: [Player]}
+  | UnjoinFail
+  | UnjoinEndGame {guid :: Text}
 
 postUnjoinHanabiR :: Handler ()
 postUnjoinHanabiR = do
@@ -171,33 +194,33 @@ postUnjoinHanabiR = do
         (True, _    ) -> return UnjoinFail -- unjoin is only for games that haven't started
         (False,True ) -> 
           do delete gid 
-             return $ UnjoinEndGame (gameUid game) (keyToInt gid)
+             return $ UnjoinEndGame (gameUid game)
         (False,False) ->
           let newPlayers = filter (\p -> nm /= playerName p) players in
-          do update gid [GamePlayers =. newPlayers]
-             return (UnjoinSuccess (keyToInt gid) (gameUid game) newPlayers)
+          do update gid [GamePlayers =. newPlayers] -- XXX leader
+             return (UnjoinSuccess (gameUid game) newPlayers)
     )
   case res of
-    UnjoinSuccess gid guid ps -> 
-      do deleteSession sgameid --XXX update game screen
+    UnjoinSuccess guid ps -> 
+      do deleteSession sgameid
          liftIO $ writeChan lobbyChan $ 
             ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
-               encode (GameListMsg GLEUpdatePlayers gid guid ps)
+               encode (GameListMsg GLEUpdatePlayers guid ps)
          gchan <- getChannel guid
          liftIO $ writeChan gchan $ 
             ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
                encode (PlayerListMsg PLELeave nm ps)
          redirect HanabiLobbyR
     UnjoinFail         -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
-    UnjoinEndGame guid gid ->
+    UnjoinEndGame guid ->
       do deleteSession sgameid
          gamesLeft <- liftM null $ runDB $ selectList [GameActive ==. False] []
          liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $ 
               fromLazyByteString 
-              (encode (GameListMsg (GLEDeleteGame gamesLeft) gid guid []))
+              (encode (GameListMsg (GLEDeleteGame gamesLeft) guid []))
          redirect HanabiLobbyR
 
-data JoinResult = JSuccess Int [Player]
+data JoinResult = JSuccess [Player]
                 | JFailGameGone | JFailGameStarted | JFailGameFull
 --- XXX CHECK IF PLAYER IS ALREADY IN GAME TO MAKE IDEMPOTENT             
    
@@ -212,11 +235,11 @@ postJoinHanabiR guid = do
         return JFailGameStarted
       Just (Entity gid (Game {gameActive=False,gamePlayers})) ->
         if (length gamePlayers >= 5) then return JFailGameFull
-           else let newPlayers = (Player nm []):gamePlayers in
+           else let newPlayers = gamePlayers ++ [Player nm []] in
                 do update gid [GamePlayers =. newPlayers]
-                   return $ JSuccess (keyToInt gid) newPlayers
+                   return $ JSuccess newPlayers
   case res of
-    JSuccess gid ps -> 
+    JSuccess ps -> 
       do gchan <- getChannel guid
          lchan <- liftM lobbyChannel getYesod
          setSession sgameid guid
@@ -224,7 +247,7 @@ postJoinHanabiR guid = do
                fromLazyByteString $ encode (PlayerListMsg PLEJoin nm ps)
          liftIO $ writeChan lchan $ ServerEvent Nothing Nothing $ return $ 
                fromLazyByteString $ 
-               encode (GameListMsg GLEUpdatePlayers gid guid ps)
+               encode (GameListMsg GLEUpdatePlayers guid ps)
          redirect PlayHanabiR
     JFailGameGone -> -- XXX use somethign better than setmessage
       do setMessage 
@@ -342,7 +365,7 @@ gameListWidget games = do
             $(newform).attr('action','joinhanabi/'+event.GUID);
 
             $(newbutton).attr('type','submit');
-            $(newbutton).attr('value','Game '+event.GID);
+            $(newbutton).attr('value','Game '+event.GUID);
             
             $(newp).attr('class',#{toJSON gplayersC});
             $(newp).append(displayPlayerList(event.Players));
@@ -366,31 +389,19 @@ gameListWidget games = do
 
 getHanabiLobbyR :: Handler RepHtml
 getHanabiLobbyR =
-  do mname <- lookupSession sname
+  do nm <- requireName
      mguid <- lookupSession sgameid
      when (isJust mguid) $ redirect PlayHanabiR
-     case mname of
-       Nothing -> do 
-         ((_, widget),enctype) <- generateFormGet nameForm
-         defaultLayout [whamlet|
-             <p>Welcome to Hanabi.
+     games <- runDB $ selectList [GameActive ==. False] []
+     defaultLayout [whamlet|
+         <p>Welcome to Hanabi, #{nm}
+                    
+         ^{gameListWidget games}
 
-             <p>
-               <form method=get action=@{SetNameR} enctype=#{enctype}>
-                 ^{widget}
-                 <input type=submit>
-           |]
-       Just nm -> do
-         games <- runDB $ selectList [GameActive ==. False] []
-         defaultLayout [whamlet|
-             <p>Welcome to Hanabi, #{nm}
-                        
-             ^{gameListWidget games}
-
-             <p>
-               <form method=post action=@{CreateHanabiR}>
-                  <input type=submit value="Create a new game">
-          |]
+         <p>
+           <form method=post action=@{CreateHanabiR}>
+              <input type=submit value="Create a new game">
+      |]
 
 getGameEventReceiveR :: Text -> Handler ()
 getGameEventReceiveR guid = do

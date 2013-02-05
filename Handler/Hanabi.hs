@@ -8,7 +8,6 @@ import Data.Text (pack,append)
 import qualified Data.Text as T (concat)
 
 import Data.Aeson
-import qualified Data.Aeson as J (Value)
 import Data.Aeson.TH
 
 import Control.Monad (liftM,when,unless)
@@ -110,8 +109,11 @@ nameForm = renderDivs $ areq textField "" Nothing
 --------------------------
 ----- EVENTS -------------
 
-data GameListEvent = GLEAddGame   | GLEDeleteGame Bool -- Is this the last game?
-                   | GLEUpdatePlayers
+
+-- events for the main list of games
+data GameListEvent = GLEAddGame   
+                   | GLEDeleteGame Bool -- Is this the last game?
+                   | GLEUpdatePlayers 
 $(deriveJSON id ''GameListEvent)
 
 data GameListMsg = GameListMsg {glmEType   :: GameListEvent,
@@ -120,13 +122,9 @@ data GameListMsg = GameListMsg {glmEType   :: GameListEvent,
 $(deriveJSON (drop 3) ''GameListMsg)
 
 
-
-data PlayerListEvent = PLEJoin | PLELeave
-$(deriveJSON id ''PlayerListEvent)
-
-pleJoin,pleLeave :: J.Value
-pleJoin  = toJSON $ encode PLEJoin
-pleLeave = toJSON $ encode PLELeave
+-- events for individual game lobbies
+data PlayerListEvent = PLEJoin | PLELeave {pleNewLeader :: Maybe Text}
+$(deriveJSON (drop 3) ''PlayerListEvent)
 
 data PlayerListMsg = PlayerListMsg {plmEType :: PlayerListEvent,
                                     plmPlayer :: Text,
@@ -180,7 +178,7 @@ postCreateHanabiR = do
   redirect PlayHanabiR
 
 data UnjoinResult =
-    UnjoinSuccess {guid :: Text, players :: [Player]}
+    UnjoinSuccess {guid :: Text, players :: [Player], newLeader :: Maybe Text}
   | UnjoinFail
   | UnjoinEndGame {guid :: Text}
 
@@ -196,12 +194,18 @@ postUnjoinHanabiR = do
           do delete gid 
              return $ UnjoinEndGame (gameUid game)
         (False,False) ->
-          let newPlayers = filter (\p -> nm /= playerName p) players in
-          do update gid [GamePlayers =. newPlayers] -- XXX leader
-             return (UnjoinSuccess (gameUid game) newPlayers)
+          let newPlayers = filter (\p -> nm /= playerName p) players
+              replaceLeader = 
+                case (newPlayers, nm == gameLeader game) of
+                  (p : _, True) -> Just $ playerName p
+                  _             -> Nothing
+           in
+          do update gid (  (GamePlayers =. newPlayers)
+                         : maybe [] (\n -> [GameLeader =. n]) replaceLeader)
+             return (UnjoinSuccess (gameUid game) newPlayers replaceLeader)
     )
   case res of
-    UnjoinSuccess guid ps -> 
+    UnjoinSuccess guid ps rleader -> 
       do deleteSession sgameid
          liftIO $ writeChan lobbyChan $ 
             ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
@@ -209,7 +213,7 @@ postUnjoinHanabiR = do
          gchan <- getChannel guid
          liftIO $ writeChan gchan $ 
             ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
-               encode (PlayerListMsg PLELeave nm ps)
+               encode (PlayerListMsg (PLELeave rleader) nm ps)
          redirect HanabiLobbyR
     UnjoinFail         -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
     UnjoinEndGame guid ->
@@ -269,30 +273,47 @@ getStartHanabiR = do
     update gid [GameActive =. True])
   redirect PlayHanabiR
 
-
-playerListWidget :: Text -> Text -> Widget
-playerListWidget initPlayers guid =
+                 
+playerListWidget :: Text -> Game -> Widget
+playerListWidget nm game =
+  let names = prettyNameList game
+      guid = gameUid game
+  in
   do playerList <- lift newIdent
      mbox <- lift newIdent
+     startButton <- lift newIdent
+     toWidgetHead [lucius|
+        .hidden {
+          display: none;
+        }
+      |]
      [whamlet|
        <p id=#{mbox}>
-       <p id=#{playerList}>#{initPlayers}
+       <p id=#{playerList}>#{names}
        
        <table>
          <tr>
-           <td>
-             <form method=get action=@{StartHanabiR}>
-               <input type=submit value="Start the game">
+           $if nm == gameLeader game
+             <td id=#{startButton}>
+               <form method=get action=@{StartHanabiR}>
+                   <input type=submit value="Start the game">
+           $else
+             <td id=#{startButton} class="hidden">
+               <form method=get action=@{StartHanabiR}>
+                   <input type=submit value="Start the game">
            <td>
              <form method=post action=@{UnjoinHanabiR}>
                <input type=submit value="Leave the game">
                        
-     |] -- XXX only "leader" should be allowed to start
-        -- XXX grey out start box
+     |] -- XXX grey out start box
      toWidgetBody [julius|
         var list = document.getElementById(#{toJSON playerList});
         var mbox = document.getElementById(#{toJSON mbox});
+        var name = #{toJSON nm};
+        var startButton = document.getElementById(#{toJSON startButton});
+
         var src = new EventSource("@{GameEventReceiveR guid}");
+
         src.onmessage = function(msg) {
           var event = JSON.parse(msg.data);
           var etype = event.EType;
@@ -300,20 +321,25 @@ playerListWidget initPlayers guid =
             mbox.innerHTML = event.Player + " joined the game.";
           } else if ("PLELeave" in etype) {
             mbox.innerHTML = event.Player + " left the game.";
+            if (etype.PLELeave.NewLeader == name) {
+               mbox.innerHTML += "  You are now the leader";
+               $(startButton).fadeIn(400,function() {$(startButton).removeClass();});
+            }
           }
 
           list.innerHTML = displayPlayerList(event.Players);
-        }; |]
+        }; 
+     |]
 
 getPlayHanabiR :: Handler RepHtml
 getPlayHanabiR = do
+  nm <- requireName
   game <- requireGame
-  let names = prettyNameList game
   case gameActive game of
     False -> defaultLayout [whamlet|
         <p> This game hasn't started yet.  These players have joined:
         
-        ^{playerListWidget names $ gameUid game}
+        ^{playerListWidget nm game}
       |]
     -- Still need to add back start game button
     True -> defaultLayout [whamlet|Well, the game started.  But I haven't implemented that yet.  Bummer.|]
@@ -375,7 +401,7 @@ gameListWidget games = do
             $("#"+#{toJSON instructionsI}).text(#{toJSON somegames});
             $("#"+#{toJSON glistI}).prepend(newli);
             $(newli).slideDown(400,function() {$(newli).removeClass();});
-          } else if ("GLEDeleteGame" in etype) { -- XXX
+          } else if ("GLEDeleteGame" in etype) {
             if (etype.GLEDeleteGame) {
               $("#"+#{toJSON instructionsI}).text(#{toJSON nogames});
             };
@@ -394,7 +420,7 @@ getHanabiLobbyR =
      when (isJust mguid) $ redirect PlayHanabiR
      games <- runDB $ selectList [GameActive ==. False] []
      defaultLayout [whamlet|
-         <p>Welcome to Hanabi, #{nm}
+         <p>Welcome to Hanabi, #{nm}.
                     
          ^{gameListWidget games}
 

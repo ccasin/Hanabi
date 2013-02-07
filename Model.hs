@@ -9,13 +9,19 @@ import Database.Persist.Quasi
 import Database.Persist.Store
 
 import Data.Aeson.TH
+import Data.Array.IO
+
+import Control.Monad (forM)
+
+import System.Random (randomRIO)
+
 
 -- You can define all of your database entities in the entities file.
 -- You can find more information on persistent and how to declare entities
 -- at:
 -- http://www.yesodweb.com/book/persistent/
 
-data Color = Red | Blue | Green | Yellow | Black
+data Color = Red | Blue | Green | Yellow | Purple
     deriving (Show,Read,Eq)
 derivePersistField "Color"
 $(deriveJSON id ''Color)
@@ -29,6 +35,32 @@ data Card  = Card {cardColor :: Color, cardRank :: Rank}
     deriving (Show,Read,Eq)
 derivePersistField "Card"
 $(deriveJSON (drop 4) ''Card)
+
+allCards :: [Card]
+allCards = [Card col rank | col  <- [Red, Blue, Green, Yellow, Purple],
+                            rank <- [One,   One,   One,
+                                     Two,   Two,
+                                     Three, Three,
+                                     Four,  Four,
+                                     Five]]
+
+-- shuffle stolen from haskell wiki.  imperitive, but O(n)
+shuffle :: [a] -> IO [a]
+shuffle xs = do
+        ar <- newArr ln xs
+        forM [1..ln] $ \i -> do
+            j <- randomRIO (i,ln)
+            vi <- readArray ar i
+            vj <- readArray ar j
+            writeArray ar j vi
+            return vj
+  where
+    ln :: Int
+    ln = length xs
+
+    newArr :: Int -> [a] -> IO (IOArray Int a)
+    newArr n l =  newListArray (1,n) l
+--
 
 data Fact a = Mystery | Isnt [a] | Is a
     deriving (Show,Read,Eq)

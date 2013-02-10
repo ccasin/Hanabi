@@ -22,8 +22,6 @@ import Yesod.Auth
 ----  
 ---- TODO
 ----
----- FIX LEADER NONSENSE
-----
 ---- - game implementation...
 
 keyToInt :: GameId -> Int
@@ -170,7 +168,7 @@ postCreateHanabiR = do
   nm     <- requireName
   guid   <- newChannel
   let newPlayer = Player nm []
-  _      <- runDB $ insert $ Game False guid (playerName newPlayer) [newPlayer]
+  _      <- runDB $ insert $ Game False guid (playerName newPlayer) [newPlayer] []
   setSession sgameid guid
   lobbyChan <- liftM lobbyChannel getYesod
   liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $
@@ -265,12 +263,28 @@ postJoinHanabiR guid = do
          redirect HanabiLobbyR
 
 
+data StartResult = StartSuccess | StartNeedPlayers | StartNotLeader
+
 getStartHanabiR :: Handler ()
 getStartHanabiR = do 
+  nm <- requireName
   -- XXX send event message to all players to start game
-  requireGameTransaction (\gid _ -> 
-    --- XXX also need to shuffle and deal
-    update gid [GameActive =. True])
+  result <- requireGameTransaction (\gid game -> 
+    case (gameLeader game == nm, length (gamePlayers game) >= 2) of
+      (False, _)  -> return StartNotLeader
+      (_, False)  -> return StartNeedPlayers
+      (True,True) -> do 
+        (dealtPlayers,deck) <- liftIO $ deal (gamePlayers game)
+             -- XXX I should really precompute some shuffles to avoid
+             -- locking up the DB like this
+        update gid [GameActive =. True,
+                    GamePlayers =. dealtPlayers,
+                    GameDeck =. deck]
+        return StartSuccess)
+  case result of
+    StartNotLeader   -> setMessage "Sorry, you must be the leader to start the game."
+    StartNeedPlayers -> setMessage "Sorry, two players are needed for Hanabi."
+    StartSuccess     -> return ()
   redirect PlayHanabiR
 
                  
@@ -331,6 +345,14 @@ playerListWidget nm game =
         }; 
      |]
 
+gameWidget :: Game -> Widget
+gameWidget game =
+  let players = gamePlayers game in
+  do [whamlet|
+       $forall p <- players
+         <div id=#{playerName p}>
+     |]
+
 getPlayHanabiR :: Handler RepHtml
 getPlayHanabiR = do
   nm <- requireName
@@ -341,8 +363,7 @@ getPlayHanabiR = do
         
         ^{playerListWidget nm game}
       |]
-    -- Still need to add back start game button
-    True -> defaultLayout [whamlet|Well, the game started.  But I haven't implemented that yet.  Bummer.|]
+    True -> defaultLayout $ gameWidget game
 
 gameListWidget :: [Entity Game] -> Widget
 gameListWidget games = do

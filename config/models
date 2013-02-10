@@ -11,6 +11,7 @@ Game
   UniqueUid uid
   leader    Text
   players   [Player]
+  deck      [Card]
   
 Completed
   players [Text]

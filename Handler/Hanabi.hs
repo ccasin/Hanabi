@@ -4,8 +4,8 @@ import Import
 
 import Data.Maybe (isJust)
 import Data.IORef
-import Data.Text (pack,append)
-import qualified Data.Text as T (concat)
+import Data.Text (pack,append,strip)
+import qualified Data.Text as T (concat,length)
 
 import Data.Aeson
 import Data.Aeson.TH
@@ -148,20 +148,27 @@ getSetNameR =
           <input type=submit value="Set nickname">
      |]
 
+data NameResult = NameSuccess | NameTaken | NameInvalid
+
 postSetNameR :: Handler ()
 postSetNameR =
   do uid <- requireAuthId
      ((result, _), _) <- runFormPost nameForm
      case result of
-       FormSuccess nm -> do 
-         success <- runDB $ do 
+       FormSuccess nmUnsanitized -> do
+         let nm = strip nmUnsanitized
+         nmResult <- if T.length nm < 1 then return NameInvalid else runDB $ do 
            taken <- liftM isJust $ getBy $ UniqueName nm
            unless taken $ update uid [UserName =. nm]
-           return $ not taken
-         if success then redirect HanabiLobbyR
-                    else do setMessage $ toHtml $
-                                T.concat ["Sorry, ",nm," is taken."]
-                            redirect SetNameR
+           return $ if taken then NameTaken else NameSuccess
+         case nmResult of
+           NameSuccess -> redirect HanabiLobbyR
+           NameTaken -> do
+            setMessage $ toHtml $ T.concat ["Sorry, ",nm," is taken."]
+            redirect SetNameR
+           NameInvalid -> do
+            setMessage $ toHtml $ T.concat ["Sorry, ",nm," is not a valid name."]
+            redirect SetNameR
        _ -> do setMessage "Please Enter a valid name."
                redirect SetNameR
 

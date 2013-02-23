@@ -52,10 +52,11 @@ instance (Show a,Read a) => PersistField (Fact a) where
 
     sqlType _ = SqlString
 
-data Knowledge = Knowledge (Fact Color) (Fact Rank)
+data Knowledge = Knowledge {knownColor :: Fact Color,
+                            knownRank  :: Fact Rank}
   deriving (Show,Read,Eq)
 derivePersistField "Knowledge"
-$(deriveJSON id ''Knowledge)
+$(deriveJSON (drop 5) ''Knowledge)
 
 data Player = Player {playerName :: Text,
                       playerHand :: [(Card,Knowledge)]}

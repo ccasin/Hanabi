@@ -19,10 +19,15 @@ import Network.Wai.EventSource
 import System.Random (randomRIO)
 import Yesod.Auth
 
+
+
 ----  
 ---- TODO
 ----
 ---- - game implementation...
+----
+---- - xxx can't change name while playing
+---- - xxx dummy auth doesn't handle non-unique names right.
 
 keyToInt :: GameId -> Int
 keyToInt gid = 
@@ -147,6 +152,24 @@ getSetNameR =
      |]
 
 data NameResult = NameSuccess | NameTaken | NameInvalid
+
+--- XXX MUST REMOVE
+getDumpTablesR :: Handler RepHtml
+getDumpTablesR =
+  do people <- runDB $ selectList ([] :: [Filter User]) []
+     defaultLayout [whamlet|
+       <p>table dump
+       <ol>
+         $forall Entity _ p <- people
+           <li>
+             <table>
+               <tr><td>source</td><td>credID</td><td>name</td></tr>
+               <tr>
+                 <td>#{userCredSource p}
+                 <td>#{userCredID p}
+                 <td>#{userName p}
+       |]
+      
 
 postSetNameR :: Handler ()
 postSetNameR =
@@ -352,13 +375,70 @@ playerListWidget nm game =
         }; 
      |]
 
-gameWidget :: Game -> Widget
-gameWidget game =
-  let players = gamePlayers game in
+
+gameWidget :: Game -> Text -> Widget
+gameWidget game nm =
+  let players = gamePlayers game 
+  in
   do [whamlet|
        $forall p <- players
-         <div id=#{playerName p}>
+         ^{playerDiv p}
      |]
+     toWidgetHead [lucius|
+        .playerDiv {
+          -moz-border-radius: 15px;
+          border-radius: 15px;
+          border: 2px solid;
+          margin: 10px;
+          padding: 5px;
+        }
+     |]
+  where
+    playerDiv (Player {playerName=name, playerHand=hand}) =
+     let
+       cards :: [(Int,Card)]
+       cards = zip [1..] $ map fst hand
+
+       knowledge :: [(Int,Knowledge)]
+       knowledge = zip [1..] $ map snd hand
+
+       colorKnowledge :: [(Int,Fact Color)]
+       colorKnowledge = map (\(i,k) -> (i,knownColor k)) knowledge
+
+       rankKnowledge :: [(Int,Fact Rank)]
+       rankKnowledge = map (\(i,k) -> (i,knownRank k)) knowledge
+
+       idName :: Text -> Int -> Text
+       idName t n = T.concat [name, t, pack $ show n]
+     in
+       [whamlet|
+           <div id=#{name} class="playerDiv">
+             <p>
+               <b> #{name}
+             <table>
+               <tr>
+                 <td></td>
+                 $if nm == name
+                   $forall (i,k) <- knowledge
+                     <td id=#{idName "card" i}>
+                       <img src=@{StaticR $ knowledgeToRoute k}>
+                 $else
+                   $forall (i,c) <- cards
+                     <td id=#{idName "card" i}>
+                       <img src=@{StaticR $ cardToRoute c}>
+               <tr>
+                 <td rowspan="2">Knowledge:
+                 $forall (i,k) <- colorKnowledge
+                   <td id=#{idName "color" i}>
+                     #{show k}
+               <tr>
+                 $forall (i,k) <- rankKnowledge
+                   <td id=#{idName "rank" i}>
+                     #{show k}
+       |]
+
+
+
 
 getPlayHanabiR :: Handler RepHtml
 getPlayHanabiR = do
@@ -370,7 +450,7 @@ getPlayHanabiR = do
         
         ^{playerListWidget nm game}
       |]
-    True -> defaultLayout $ gameWidget game
+    True -> defaultLayout $ gameWidget game nm
 
 gameListWidget :: [Entity Game] -> Widget
 gameListWidget games = do

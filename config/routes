@@ -16,3 +16,5 @@
 /lobbyeventreceive         LobbyEventReceiveR  GET
 
 /setname SetNameR GET POST
+
+/dumptables DumpTablesR GET

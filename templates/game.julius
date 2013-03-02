@@ -1,0 +1,31 @@
+function getColumn (name,num) {
+  var index = num+1;
+  var rowString = "#"+name+"CardRow,#"
+                     +name+"ColorRow,#"
+                     +name+"KnowledgeRow";
+  return $(rowString).children("td:nth-child("+index+")");
+}
+
+function getCard (name,num) {
+  var index = num+1;
+  return $("#"+name+"CardRow>td:nth-child("+index+")>img");
+}
+
+function sendDiscard (n) {
+  for (var i=1; i <= #{toJSON numCards}; i++) {
+    getCard(#{toJSON nm},i)
+      .removeAttr("onclick")
+      .removeClass("clickable");
+  }
+  $.post("@{DiscardR}",n);
+  var column = getColumn(#{toJSON nm},n);
+  column.fadeOut('slow',function () {column.remove()});
+}
+
+function makeDiscards () {
+  for (var i=1; i <= #{toJSON numCards}; i++) {
+    getCard(#{toJSON nm},i)
+      .attr("onclick","sendDiscard ("+i+")")
+      .addClass("clickable");
+  }
+}

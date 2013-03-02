@@ -1,0 +1,14 @@
+<div id="actions" class="curvy">
+  <div class="topAction" id="playAction">
+    <button type="button" class="actionButton">Play
+  <div class="topAction" id="discardAction">
+    <button type="button" class="actionButton" onclick="makeDiscards ()">Discard
+  <div class="topAction" id="hintAction">
+    <button type="button" class="actionButton">Hint
+          
+
+<div id="chat" class="curvy">
+
+<div id="playerCards">
+  $forall p <- players
+    ^{playerDiv p}

@@ -17,9 +17,8 @@ import Blaze.ByteString.Builder (fromLazyByteString)
 
 import Network.Wai.EventSource
 import System.Random (randomRIO)
+
 import Yesod.Auth
-
-
 
 ----  
 ---- TODO
@@ -27,7 +26,7 @@ import Yesod.Auth
 ---- - game implementation...
 ----
 ---- - xxx can't change name while playing
----- - xxx dummy auth doesn't handle non-unique names right.
+---- - xxx dummy auth doesn't handle non-unique names right, and doens't restrict name length.
 
 keyToInt :: GameId -> Int
 keyToInt gid = 
@@ -105,7 +104,7 @@ requireGameTransaction trans = do
     Just g -> return g
 
 nameForm :: Form Text
-nameForm = renderDivs $ areq textField "" Nothing
+nameForm = renderDivs $ areq textField "" {fsAttrs = [("maxLength","20")]} Nothing
 --------------------------
 --------------------------
 
@@ -126,7 +125,7 @@ $(deriveJSON (drop 3) ''GameListMsg)
 
 
 -- events for individual game lobbies
-data PlayerListEvent = PLEJoin | PLELeave {pleNewLeader :: Maybe Text}
+data PlayerListEvent = PLEJoin | PLELeave {pleNewLeader :: Maybe Text} | PLEStart
 $(deriveJSON (drop 3) ''PlayerListEvent)
 
 data PlayerListMsg = PlayerListMsg {plmEType :: PlayerListEvent,
@@ -293,7 +292,7 @@ postJoinHanabiR guid = do
          redirect HanabiLobbyR
 
 
-data StartResult = StartSuccess | StartNeedPlayers | StartNotLeader
+data StartResult = StartSuccess Game | StartNeedPlayers | StartNotLeader
 
 getStartHanabiR :: Handler ()
 getStartHanabiR = do 
@@ -310,11 +309,15 @@ getStartHanabiR = do
         update gid [GameActive =. True,
                     GamePlayers =. dealtPlayers,
                     GameDeck =. deck]
-        return StartSuccess)
+        return $ StartSuccess game)
   case result of
-    StartNotLeader   -> setMessage "Sorry, you must be the leader to start the game."
-    StartNeedPlayers -> setMessage "Sorry, two players are needed for Hanabi."
-    StartSuccess     -> return ()
+    StartNotLeader    -> setMessage "Sorry, you must be the leader to start the game."
+    StartNeedPlayers  -> setMessage "Sorry, two players are needed for Hanabi."
+    StartSuccess game -> 
+      do gchan <- getChannel $ gameUid game
+         liftIO $ writeChan gchan $ 
+            ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
+               encode (PlayerListMsg PLEStart (gameLeader game) (gamePlayers game))
   redirect PlayHanabiR
 
                  
@@ -326,11 +329,6 @@ playerListWidget nm game =
   do playerList <- lift newIdent
      mbox <- lift newIdent
      startButton <- lift newIdent
-     toWidgetHead [lucius|
-        .hidden {
-          display: none;
-        }
-      |]
      [whamlet|
        <p id=#{mbox}>
        <p id=#{playerList}>#{names}
@@ -369,6 +367,8 @@ playerListWidget nm game =
                mbox.innerHTML += "  You are now the leader";
                $(startButton).fadeIn(400,function() {$(startButton).removeClass();});
             }
+          } else if ("PLEStart" in etype) {
+            location.reload(true);
           }
 
           list.innerHTML = displayPlayerList(event.Players);
@@ -377,68 +377,47 @@ playerListWidget nm game =
 
 
 gameWidget :: Game -> Text -> Widget
-gameWidget game nm =
-  let players = gamePlayers game 
-  in
-  do [whamlet|
-       $forall p <- players
-         ^{playerDiv p}
-     |]
-     toWidgetHead [lucius|
-        .playerDiv {
-          -moz-border-radius: 15px;
-          border-radius: 15px;
-          border: 2px solid;
-          margin: 10px;
-          padding: 5px;
-        }
-     |]
+gameWidget game nm = $(widgetFile "game")
   where
+    players :: [Player]
+    players = gamePlayers game
+
+    numCards :: Int
+    numCards = if length players < 4 then 5 else 4
+
     playerDiv (Player {playerName=name, playerHand=hand}) =
      let
-       cards :: [(Int,Card)]
-       cards = zip [1..] $ map fst hand
+       knowledge :: [Knowledge]
+       knowledge = map snd hand
 
-       knowledge :: [(Int,Knowledge)]
-       knowledge = zip [1..] $ map snd hand
+       colorKnowledge :: [Fact Color]
+       colorKnowledge = map knownColor knowledge
 
-       colorKnowledge :: [(Int,Fact Color)]
-       colorKnowledge = map (\(i,k) -> (i,knownColor k)) knowledge
-
-       rankKnowledge :: [(Int,Fact Rank)]
-       rankKnowledge = map (\(i,k) -> (i,knownRank k)) knowledge
-
-       idName :: Text -> Int -> Text
-       idName t n = T.concat [name, t, pack $ show n]
+       rankKnowledge :: [Fact Rank]
+       rankKnowledge = map knownRank knowledge
      in
        [whamlet|
-           <div id=#{name} class="playerDiv">
+           <div id=#{name} class="curvy">
              <p>
                <b> #{name}
-             <table>
-               <tr>
+             <table id=#{append name "cards"}>
+               <tr id=#{append name "CardRow"}>
                  <td></td>
                  $if nm == name
-                   $forall (i,k) <- knowledge
-                     <td id=#{idName "card" i}>
-                       <img src=@{StaticR $ knowledgeToRoute k}>
+                   $forall k <- knowledge
+                     <td> <img src=@{StaticR $ knowledgeToRoute k}>
                  $else
-                   $forall (i,c) <- cards
-                     <td id=#{idName "card" i}>
-                       <img src=@{StaticR $ cardToRoute c}>
-               <tr>
+                   $forall c <- map fst hand
+                     <td> <img src=@{StaticR $ cardToRoute c}>
+               <tr id=#{append name "ColorRow"}>
                  <td rowspan="2">Knowledge:
-                 $forall (i,k) <- colorKnowledge
-                   <td id=#{idName "color" i}>
-                     #{show k}
-               <tr>
-                 $forall (i,k) <- rankKnowledge
-                   <td id=#{idName "rank" i}>
-                     #{show k}
+                 $forall k <- colorKnowledge
+                   <td>#{show k}
+               <tr id=#{append name "KnowledgeRow"}>
+                 <td class="hidden"></td>
+                 $forall k <- rankKnowledge
+                   <td>#{show k}
        |]
-
-
-
 
 getPlayHanabiR :: Handler RepHtml
 getPlayHanabiR = do
@@ -474,10 +453,10 @@ gameListWidget games = do
            #{somegames}
             
        <ul id=#{glistI}>
-         $forall Entity gid g <- games
+         $forall Entity _ g <- games
            <li id="#{gameUid g}">
              <form method=post action=@{JoinHanabiR (gameUid g)}>
-                <input type=submit value="Game #{keyToInt gid}">
+                <input type=submit value="Game #{gameUid g}">
              <p class=#{gplayersC}>
                #{prettyNameList g}
        |]
@@ -513,7 +492,8 @@ gameListWidget games = do
             if (etype.GLEDeleteGame) {
               $("#"+#{toJSON instructionsI}).text(#{toJSON nogames});
             };
-            $("#"+event.GUID).fadeOut();
+            var gamediv = $("#"+event.GUID);
+            gamediv.fadeOut("slow",function () {gamediv.remove()});
           } else if ("GLEUpdatePlayers" in etype) {
             $("#"+event.GUID+">."+#{toJSON gplayersC}).
                  text(displayPlayerList(event.Players));
@@ -552,3 +532,13 @@ getLobbyEventReceiveR = do
   req <- waiRequest
   res <- lift $ eventSourceAppChan chan req
   sendWaiResponse res
+
+
+---------------------------------------
+----- Game event handlers (AJAX) ------
+
+postDiscardR :: Handler RepJson
+postDiscardR = jsonToRepJson ("" :: Text)
+
+
+

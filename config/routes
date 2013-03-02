@@ -18,3 +18,5 @@
 /setname SetNameR GET POST
 
 /dumptables DumpTablesR GET
+
+/discard DiscardR POST

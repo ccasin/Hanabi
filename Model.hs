@@ -64,9 +64,11 @@ data Player = Player {playerName :: Text,
 derivePersistField "Player"
 $(deriveJSON (drop 6) ''Player)
 
+data GameStatus = NotStarted | Running | EndsAfter Text | Done
+  deriving (Show,Read,Eq)
+derivePersistField "GameStatus"
 
-
-share [mkPersist sqlSettings, mkMigrate "migrateAll"]
+share [mkPersist sqlOnlySettings, mkMigrate "migrateAll"]
     $(persistFileWith lowerCaseSettings "config/models")
 
 

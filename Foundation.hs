@@ -19,6 +19,7 @@ import Model
 import Text.Jasmine (minifym)
 import Web.ClientSession (getKey)
 import Text.Hamlet (hamletFile)
+import System.Log.FastLogger (Logger)
 
 import Control.Concurrent.Chan (Chan)
 import Network.Wai.EventSource (ServerEvent)
@@ -37,6 +38,7 @@ data App = App
     , connPool :: Database.Persist.Store.PersistConfigPool Settings.PersistConfig -- ^ Database connection pool.
     , httpManager :: Manager
     , persistConfig :: Settings.PersistConfig
+    , appLogger :: Logger
     , lobbyChannel :: Chan ServerEvent
     , gameChannels :: IORef [(Text,Chan ServerEvent)]
     }
@@ -76,7 +78,9 @@ instance Yesod App where
     -- default session idle timeout is 120 minutes
     makeSessionBackend _ = do
         key <- getKey "config/client_session_key.aes"
-        return . Just $ clientSessionBackend key 120
+        let timeout = 120 * 60 -- 120 minutes
+        (getCachedDate, _closeDateCache) <- clientSessionDateCacher timeout
+        return . Just $ clientSessionBackend2 key getCachedDate
 
     defaultLayout widget = do
         master <- getYesod

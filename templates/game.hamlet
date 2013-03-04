@@ -10,5 +10,5 @@
 <div id="chat" class="curvy">
 
 <div id="playerCards">
-  $forall p <- players
-    ^{playerDiv p}
+  $forall (pn,p) <- players
+    ^{playerDiv pn p}

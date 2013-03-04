@@ -3,7 +3,7 @@ Default: &defaults
   port: 3000
   approot: "http://localhost:3000"
   #approot: "http://158.130.105.182:3000"
-  copyright: 
+  #copyright: Bogus
   #analytics: UA-YOURCODE
 
 Development:

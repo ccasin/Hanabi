@@ -7,7 +7,7 @@ import Data.IORef
 import Data.Text (pack,append,strip)
 import qualified Data.Text as T (concat,length)
 
-import Data.Aeson
+import Data.Aeson hiding (object)
 import Data.Aeson.TH
 
 import Control.Monad (liftM,when,unless)
@@ -27,6 +27,7 @@ import Yesod.Auth
 ----
 ---- - xxx can't change name while playing
 ---- - xxx dummy auth doesn't handle non-unique names right, and doens't restrict name length.
+---- - xxx clean out dummy auths on startup?
 
 keyToInt :: GameId -> Int
 keyToInt gid = 
@@ -197,7 +198,7 @@ postCreateHanabiR = do
   nm     <- requireName
   guid   <- newChannel
   let newPlayer = Player nm []
-  _      <- runDB $ insert $ Game False guid (playerName newPlayer) [newPlayer] []
+  _      <- runDB $ insert $ Game NotStarted guid (playerName newPlayer) [newPlayer] []
   setSession sgameid guid
   lobbyChan <- liftM lobbyChannel getYesod
   liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $
@@ -215,12 +216,11 @@ postUnjoinHanabiR = do
   lobbyChan <- liftM lobbyChannel getYesod
   res <- requireGameTransaction (\gid game ->
       let players = gamePlayers game in
-      case (gameActive game, length players <= 1) of
-        (True, _    ) -> return UnjoinFail -- unjoin is only for games that haven't started
-        (False,True ) -> 
+      case (gameStatus game, length players <= 1) of
+        (NotStarted,True ) -> 
           do delete gid 
              return $ UnjoinEndGame (gameUid game)
-        (False,False) ->
+        (NotStarted,False) ->
           let newPlayers = filter (\p -> nm /= playerName p) players
               replaceLeader = 
                 case (newPlayers, nm == gameLeader game) of
@@ -230,6 +230,8 @@ postUnjoinHanabiR = do
           do update gid (  (GamePlayers =. newPlayers)
                          : maybe [] (\n -> [GameLeader =. n]) replaceLeader)
              return (UnjoinSuccess (gameUid game) newPlayers replaceLeader)
+        (_,_) -> return UnjoinFail -- unjoin is only for games that haven't started
+                                   -- XXX might want to return better error messages based on status
     )
   case res of
     UnjoinSuccess guid ps rleader -> 
@@ -245,7 +247,7 @@ postUnjoinHanabiR = do
     UnjoinFail         -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
     UnjoinEndGame guid ->
       do deleteSession sgameid
-         gamesLeft <- liftM null $ runDB $ selectList [GameActive ==. False] []
+         gamesLeft <- liftM null $ runDB $ selectList [GameStatus ==. NotStarted] []
          liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $ 
               fromLazyByteString 
               (encode (GameListMsg (GLEDeleteGame gamesLeft) guid []))
@@ -262,13 +264,12 @@ postJoinHanabiR guid = do
     mgame <- getBy $ UniqueUid guid
     case mgame of
       Nothing -> return JFailGameGone
-      Just (Entity _   (Game {gameActive=True             })) -> 
-        return JFailGameStarted
-      Just (Entity gid (Game {gameActive=False,gamePlayers})) ->
+      Just (Entity gid (Game {gameStatus=NotStarted,gamePlayers})) ->
         if (length gamePlayers >= 5) then return JFailGameFull
            else let newPlayers = gamePlayers ++ [Player nm []] in
                 do update gid [GamePlayers =. newPlayers]
                    return $ JSuccess newPlayers
+      Just _ -> return JFailGameStarted
   case res of
     JSuccess ps -> 
       do gchan <- getChannel guid
@@ -303,10 +304,12 @@ getStartHanabiR = do
       (False, _)  -> return StartNotLeader
       (_, False)  -> return StartNeedPlayers
       (True,True) -> do 
-        (dealtPlayers,deck) <- liftIO $ deal (gamePlayers game)
+        (dealtPlayers,deck) <- 
+          liftIO $ do players <- shuffle $ gamePlayers game
+                      deal players
              -- XXX I should really precompute some shuffles to avoid
              -- locking up the DB like this
-        update gid [GameActive =. True,
+        update gid [GameStatus =. Running,
                     GamePlayers =. dealtPlayers,
                     GameDeck =. deck]
         return $ StartSuccess game)
@@ -379,13 +382,13 @@ playerListWidget nm game =
 gameWidget :: Game -> Text -> Widget
 gameWidget game nm = $(widgetFile "game")
   where
-    players :: [Player]
-    players = gamePlayers game
+    players :: [(Int,Player)]
+    players = zip [1..] $ gamePlayers game
 
     numCards :: Int
     numCards = if length players < 4 then 5 else 4
 
-    playerDiv (Player {playerName=name, playerHand=hand}) =
+    playerDiv pnum (Player {playerName=name, playerHand=hand}) =
      let
        knowledge :: [Knowledge]
        knowledge = map snd hand
@@ -399,7 +402,7 @@ gameWidget game nm = $(widgetFile "game")
        [whamlet|
            <div id=#{name} class="curvy">
              <p>
-               <b> #{name}
+               <b> #{pnum}. #{name}
              <table id=#{append name "cards"}>
                <tr id=#{append name "CardRow"}>
                  <td></td>
@@ -423,13 +426,14 @@ getPlayHanabiR :: Handler RepHtml
 getPlayHanabiR = do
   nm <- requireName
   game <- requireGame
-  case gameActive game of
-    False -> defaultLayout [whamlet|
+  case gameStatus game of
+    NotStarted -> defaultLayout [whamlet|
         <p> This game hasn't started yet.  These players have joined:
         
         ^{playerListWidget nm game}
       |]
-    True -> defaultLayout $ gameWidget game nm
+    _ -> defaultLayout $ gameWidget game nm
+      -- XXX do I really want all other statuses to display gameWidget?
 
 gameListWidget :: [Entity Game] -> Widget
 gameListWidget games = do
@@ -506,7 +510,7 @@ getHanabiLobbyR =
   do nm <- requireName
      mguid <- lookupSession sgameid
      when (isJust mguid) $ redirect PlayHanabiR
-     games <- runDB $ selectList [GameActive ==. False] []
+     games <- runDB $ selectList [GameStatus ==. NotStarted] []
      defaultLayout [whamlet|
          <p>Welcome to Hanabi, #{nm}.
                     
@@ -538,7 +542,14 @@ getLobbyEventReceiveR = do
 ----- Game event handlers (AJAX) ------
 
 postDiscardR :: Handler RepJson
-postDiscardR = jsonToRepJson ("" :: Text)
+postDiscardR = do
+  objData <- requireGameTransaction (\gid game ->
+    case gameStatus game of
+      NotStarted -> return [("newcard",toJSON False)] -- XXX
+      Done -> return  [("newcard",toJSON False)] -- XXX
+      _ -> return [("newcard",toJSON True), -- XXX
+                   ("msg",toJSON ("something happened" :: Text)) -- XXX
 
-
-
+                  ]
+    )
+  jsonToRepJson $ object objData

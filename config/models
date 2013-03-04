@@ -6,7 +6,7 @@ User
   UniqueCreds credSource credID
 
 Game
-  active    Bool
+  status    GameStatus
   uid       Text
   UniqueUid uid
   leader    Text

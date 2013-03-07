@@ -11,6 +11,8 @@ Game
   UniqueUid uid
   leader    Text
   players   [Player]
+  board     Board
+  discards  Discards
   deck      [Card]
   
 Completed

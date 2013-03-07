@@ -15,10 +15,11 @@ import Control.Concurrent.Chan
 
 import Blaze.ByteString.Builder (fromLazyByteString)
 
-import Network.Wai.EventSource
 import System.Random (randomRIO)
+import Data.List (foldl')
 
 import Yesod.Auth
+import Network.Wai.EventSource
 
 ----  
 ---- TODO
@@ -27,7 +28,10 @@ import Yesod.Auth
 ----
 ---- - xxx can't change name while playing
 ---- - xxx dummy auth doesn't handle non-unique names right, and doens't restrict name length.
----- - xxx clean out dummy auths on startup?
+---- - xxx clean out dummy auths on startup? (timeout)
+---- - xxx names with special characters are not handled correctly
+----            are things being preescaped by form/db insertion and then it's messed up?
+---- - xxx figure out when to delete channels
 
 keyToInt :: GameId -> Int
 keyToInt gid = 
@@ -59,6 +63,13 @@ newChannel =
          newc     <- liftIO newChan
          liftIO $ modifyIORef iochans ((uniqueid,newc):)
          return uniqueid
+
+deleteChan :: Text -> Handler ()
+deleteChan nm =
+  do iochans <- liftM gameChannels getYesod
+     liftIO $ modifyIORef iochans $
+       foldl' (\cs (nm',c) -> if nm == nm' then cs else (nm',c):cs)
+              []
 
 
 --------------------------
@@ -121,7 +132,7 @@ $(deriveJSON id ''GameListEvent)
 
 data GameListMsg = GameListMsg {glmEType   :: GameListEvent,
                                 glmGUID    :: Text,
-                                glmPlayers :: [Player]}
+                                glmPlayers :: [Text]}
 $(deriveJSON (drop 3) ''GameListMsg)
 
 
@@ -131,7 +142,7 @@ $(deriveJSON (drop 3) ''PlayerListEvent)
 
 data PlayerListMsg = PlayerListMsg {plmEType :: PlayerListEvent,
                                     plmPlayer :: Text,
-                                    plmPlayers :: [Player]}
+                                    plmPlayers :: [Text]}
 $(deriveJSON (drop 3) ''PlayerListMsg)
 --------------------------
 --------------------------
@@ -197,12 +208,20 @@ postCreateHanabiR :: Handler ()
 postCreateHanabiR = do
   nm     <- requireName
   guid   <- newChannel
-  let newPlayer = Player nm []
-  _      <- runDB $ insert $ Game NotStarted guid (playerName newPlayer) [newPlayer] []
+  pchan  <- newChannel
+  let newPlayer = Player nm [] pchan
+  _      <- runDB $ insert $ 
+              Game { gameStatus   = NotStarted
+                   , gameUid      = guid
+                   , gameLeader   = nm
+                   , gamePlayers  = [newPlayer]
+                   , gameBoard    = Board []
+                   , gameDiscards = Discards []
+                   , gameDeck     = [] }
   setSession sgameid guid
   lobbyChan <- liftM lobbyChannel getYesod
   liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $
-     fromLazyByteString $ encode (GameListMsg GLEAddGame guid [newPlayer])
+     fromLazyByteString $ encode (GameListMsg GLEAddGame guid [nm])
   redirect PlayHanabiR
 
 data UnjoinResult =
@@ -236,13 +255,14 @@ postUnjoinHanabiR = do
   case res of
     UnjoinSuccess guid ps rleader -> 
       do deleteSession sgameid
+         let names = map playerName ps
          liftIO $ writeChan lobbyChan $ 
             ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
-               encode (GameListMsg GLEUpdatePlayers guid ps)
+               encode (GameListMsg GLEUpdatePlayers guid names)
          gchan <- getChannel guid
          liftIO $ writeChan gchan $ 
             ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
-               encode (PlayerListMsg (PLELeave rleader) nm ps)
+               encode (PlayerListMsg (PLELeave rleader) nm names)
          redirect HanabiLobbyR
     UnjoinFail         -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
     UnjoinEndGame guid ->
@@ -260,13 +280,14 @@ data JoinResult = JSuccess [Player]
 postJoinHanabiR :: Text -> Handler ()
 postJoinHanabiR guid = do
   nm <- requireName
+  pchan <- newChannel
   res <- runDB $ do 
     mgame <- getBy $ UniqueUid guid
     case mgame of
       Nothing -> return JFailGameGone
       Just (Entity gid (Game {gameStatus=NotStarted,gamePlayers})) ->
         if (length gamePlayers >= 5) then return JFailGameFull
-           else let newPlayers = gamePlayers ++ [Player nm []] in
+           else let newPlayers = gamePlayers ++ [Player nm [] pchan] in
                 do update gid [GamePlayers =. newPlayers]
                    return $ JSuccess newPlayers
       Just _ -> return JFailGameStarted
@@ -275,21 +296,25 @@ postJoinHanabiR guid = do
       do gchan <- getChannel guid
          lchan <- liftM lobbyChannel getYesod
          setSession sgameid guid
+         let names = map playerName ps
          liftIO $ writeChan gchan $ ServerEvent Nothing Nothing $ return $ 
-               fromLazyByteString $ encode (PlayerListMsg PLEJoin nm ps)
+               fromLazyByteString $ encode (PlayerListMsg PLEJoin nm names)
          liftIO $ writeChan lchan $ ServerEvent Nothing Nothing $ return $ 
                fromLazyByteString $ 
-               encode (GameListMsg GLEUpdatePlayers guid ps)
+               encode (GameListMsg GLEUpdatePlayers guid names)
          redirect PlayHanabiR
     JFailGameGone -> -- XXX use somethign better than setmessage
       do setMessage 
            "Sorry, that game was cancelled by its creator.  Please pick another."
+         deleteChan pchan
          redirect HanabiLobbyR
     JFailGameStarted ->
       do setMessage "Sorry, that game just started.  Please pick another."
+         deleteChan pchan
          redirect HanabiLobbyR
     JFailGameFull ->
       do setMessage "Sorry, that game just filled up.  Please pick another."
+         deleteChan pchan
          redirect HanabiLobbyR
 
 
@@ -309,9 +334,9 @@ getStartHanabiR = do
                       deal players
              -- XXX I should really precompute some shuffles to avoid
              -- locking up the DB like this
-        update gid [GameStatus =. Running,
+        update gid [GameStatus  =. Running 0 Nothing,
                     GamePlayers =. dealtPlayers,
-                    GameDeck =. deck]
+                    GameDeck    =. deck]
         return $ StartSuccess game)
   case result of
     StartNotLeader    -> setMessage "Sorry, you must be the leader to start the game."
@@ -320,7 +345,8 @@ getStartHanabiR = do
       do gchan <- getChannel $ gameUid game
          liftIO $ writeChan gchan $ 
             ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
-               encode (PlayerListMsg PLEStart (gameLeader game) (gamePlayers game))
+               encode (PlayerListMsg PLEStart (gameLeader game) 
+                                     (map playerName $ gamePlayers game))
   redirect PlayHanabiR
 
                  
@@ -543,13 +569,22 @@ getLobbyEventReceiveR = do
 
 postDiscardR :: Handler RepJson
 postDiscardR = do
+  nm <- requireName
   objData <- requireGameTransaction (\gid game ->
     case gameStatus game of
-      NotStarted -> return [("newcard",toJSON False)] -- XXX
-      Done -> return  [("newcard",toJSON False)] -- XXX
-      _ -> return [("newcard",toJSON True), -- XXX
-                   ("msg",toJSON ("something happened" :: Text)) -- XXX
+      NotStarted  -> return [("newcard",toJSON False)] -- XXX 
+                     --- perhaps just call discard and let it sort out things
+      Done        -> return [("newcard",toJSON False)] -- XXX
+      Running {currentP} ->
+--        case (gameDeck game,mp) of
+--          ([],Nothing) -> undefined -- XXX log some kind of error
+--          ([],Just p)  ->
+--            if nm == p then undefined else undefined
+--        where
+--          newGame :: Game
+        return [("newcard",toJSON True), -- XXX
+                ("msg",toJSON ("something happened" :: Text)) -- XXX
+               ]
 
-                  ]
     )
   jsonToRepJson $ object objData

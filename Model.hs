@@ -11,7 +11,7 @@ import Database.Persist.Store
 import Data.Aeson.TH
 import Data.Array.IO
 
-import Control.Monad (forM)
+import Control.Monad.Error
 
 import System.Random (randomRIO)
 
@@ -22,12 +22,12 @@ import System.Random (randomRIO)
 -- http://www.yesodweb.com/book/persistent/
 
 data Color = Red | Blue | Green | Yellow | Purple
-    deriving (Show,Read,Eq)
+    deriving (Show,Read,Eq,Enum,Bounded)
 derivePersistField "Color"
 $(deriveJSON id ''Color)
 
 data Rank  = One | Two | Three | Four | Five
-    deriving (Show,Read,Eq)
+    deriving (Show,Read,Eq,Enum,Bounded)
 derivePersistField "Rank"
 $(deriveJSON id ''Rank)
 
@@ -58,15 +58,33 @@ data Knowledge = Knowledge {knownColor :: Fact Color,
 derivePersistField "Knowledge"
 $(deriveJSON (drop 5) ''Knowledge)
 
-data Player = Player {playerName :: Text,
-                      playerHand :: [(Card,Knowledge)]}
+data Player = Player {playerName   :: Text,
+                      playerHand   :: [(Card,Knowledge)],
+                      playerChanId :: Text}
   deriving (Show,Read,Eq)
 derivePersistField "Player"
 $(deriveJSON (drop 6) ''Player)
 
-data GameStatus = NotStarted | Running | EndsAfter Text | Done
+
+data GameStatus = NotStarted | Running {currentP :: Int, -- index into player list
+                                        finalP :: Maybe Int}
+                             | Done
   deriving (Show,Read,Eq)
 derivePersistField "GameStatus"
+
+data Board = Board [(Color,Rank)]
+  deriving (Show,Read)
+
+instance Eq Board where
+  (Board b1) == (Board b2) =
+      all (\c -> lookup c b1 == lookup c b2) colors
+    where
+      colors = [minBound .. maxBound]
+derivePersistField "Board"
+
+data Discards = Discards [(Color,[(Rank,Int)])]
+  deriving (Show,Read)
+derivePersistField "Discards"
 
 share [mkPersist sqlOnlySettings, mkMigrate "migrateAll"]
     $(persistFileWith lowerCaseSettings "config/models")
@@ -74,6 +92,90 @@ share [mkPersist sqlOnlySettings, mkMigrate "migrateAll"]
 
 ----------------
 --- Hanabi Logic
+
+-- a function for working with association lists
+--   use the provided function to update a value.  function must
+--   provide a default value if passed Nothing, in case the key is missing
+updateAL :: Eq a => [(a,b)] -> a -> (Maybe b -> b) -> [(a,b)]
+updateAL []           k v = [(k,v Nothing)]
+updateAL ((k',v'):al) k v = 
+  if k == k' 
+    then ((k,v $ Just v'):al)
+    else (k',v'):(updateAL al k v)
+
+nextPlayer :: Game -> Int -> Int
+nextPlayer gm p = (p+1) `mod` (length $ gamePlayers gm)
+
+updatePlayer :: MonadError Text m => 
+                   [Player] -> Int -> (Player -> m (a,Player))
+                -> m (a,[Player])
+updatePlayer []     _ _ = throwError "updatePlayer: not enough players"
+updatePlayer (p:ps) 0 f = 
+  do (x,p') <- f p
+     return (x,p':ps)
+updatePlayer (p:ps) n f = 
+  do (x,ps') <- updatePlayer ps (n-1) f
+     return $ (x, p:ps')
+
+-- this draws a card if possible.  It also advances the game, setting next
+-- player and ending game if necessary.
+drawCard :: MonadError Text m => Game -> m (Game,Maybe Card)
+drawCard gm =
+  case gameStatus gm of
+    gs@(Running {currentP=cp,finalP=mfp}) ->
+      case mfp of
+        Just fp -> 
+          return (if fp == cp
+                      then gm {gameStatus=Done}
+                      else gm {gameStatus=gs {currentP=next}},
+                  Nothing)
+        Nothing ->
+          case gameDeck gm of
+            [] ->
+              return (gm {gameStatus=Running {currentP=next,
+                                              finalP=Just cp}},
+                      Nothing)
+            (c:cs) ->
+              do (_,players) <- updatePlayer (gamePlayers gm) cp
+                                (\p -> return $ ( (),
+                                   p {playerHand=playerHand p 
+                                              ++ [(c,Knowledge Mystery Mystery)]}))
+                 return (gm {gameStatus=gs {currentP=next},
+                             gameDeck=cs,
+                             gamePlayers=players},
+                         Just c)
+      where
+        next :: Int
+        next = nextPlayer gm cp
+    _ -> throwError "drawCard: Attempted to draw a card from a non-running game."
+
+-- Int input is the position in hand of the discarded card.
+-- Returns the updated game and the drawn card, if there is one.
+discard :: MonadError Text m => Game -> Int -> m (Game,Maybe Card)
+discard gm cnum =
+  case gameStatus gm of
+    (Running {currentP = cp}) ->
+      do (oldcard,players) <-
+           updatePlayer (gamePlayers gm) cp 
+             (\p -> do ((c,_),cs) <- removeNth (playerHand p) cnum
+                       return (c,p {playerHand=cs}))
+         let discards = addDiscard (gameDiscards gm) oldcard
+         drawCard (gm {gamePlayers=players,gameDiscards=discards})
+    _ -> throwError "discard: called during non-running game"
+
+  where
+    removeNth :: MonadError Text m => [a] -> Int -> m (a,[a])
+    removeNth []     _ = throwError "discard: removeNth out of bounds"
+    removeNth (x:xs) 0 = return (x,xs)
+    removeNth (x:xs) n = 
+      do (nth,xs') <- removeNth xs (n-1)
+         return (nth,x:xs')
+
+    addDiscard :: Discards -> Card -> Discards
+    addDiscard (Discards ds) (Card {cardColor,cardRank}) =
+      Discards $ updateAL ds cardColor $
+        maybe [(cardRank,1)]
+              (\rs -> updateAL rs cardRank (maybe 1 succ))
 
 prettyNameList :: Game -> Text
 prettyNameList g = intercalate ", " $ map playerName $ gamePlayers g

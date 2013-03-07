@@ -2,7 +2,7 @@ function displayPlayerList (players) {
   var output = "";
   for (i=0; i<players.length; i++) {
     if (i > 0) { output += ", " };
-    output += players[i].Name;
+    output += players[i];
   };
   return output;
 }

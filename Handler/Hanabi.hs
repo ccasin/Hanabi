@@ -594,12 +594,12 @@ postDiscardR = do
           Right (game',oldcard,newcard) -> 
             do replace gid game' -- XXX send messages to other players
                return [(newcardField, toJSON $ isJust newcard),
-                       (messageField, toJSONT
+                       (messageField, toJSONT $
                           T.concat ["You discarded a ",
                                     describeCard oldcard,
                                     if isJust newcard 
                                       then " and drew a new card."
-                                      else "."] -- XXX better message, end game
+                                      else "."]) -- XXX better message, end game
                       ])
   jsonToRepJson $ object objData
   where

@@ -39,6 +39,16 @@ keyToInt gid =
     Left _  -> 0
     Right i -> i
 
+------------------------------------
+------ Some constant strings -------
+
+cardField,messageField,errorField,newcardField :: Text
+cardField = "card"
+messageField = "msg"
+errorField = "error"
+newcardField = "newcard"
+
+
 -----------------------------
 ------ The channel map ------
 
@@ -570,21 +580,28 @@ getLobbyEventReceiveR = do
 postDiscardR :: Handler RepJson
 postDiscardR = do
   nm <- requireName
+  card <- runInputPost $ ireq intField cardField
   objData <- requireGameTransaction (\gid game ->
     case gameStatus game of
-      NotStarted  -> return [("newcard",toJSON False)] -- XXX 
-                     --- perhaps just call discard and let it sort out things
-      Done        -> return [("newcard",toJSON False)] -- XXX
+      NotStarted  -> return [(errorField,toJSONT "The game isn't running.")]
+      Done        -> return [(errorField,toJSONT "The game has already ended.")]
       Running {currentP} ->
---        case (gameDeck game,mp) of
---          ([],Nothing) -> undefined -- XXX log some kind of error
---          ([],Just p)  ->
---            if nm == p then undefined else undefined
---        where
---          newGame :: Game
-        return [("newcard",toJSON True), -- XXX
-                ("msg",toJSON ("something happened" :: Text)) -- XXX
-               ]
-
-    )
+        let correctPlayer =
+              nm == (playerName $ gamePlayers game !! currentP) in
+        if not correctPlayer then return [(errorField,toJSONT "You aren't the current player.")]
+        else case (discard game card :: Either String (Game,Card,Maybe Card))of
+          Left err -> return [(errorField,toJSON $ pack err)] -- XXX
+          Right (game',oldcard,newcard) -> 
+            do replace gid game' -- XXX send messages to other players
+               return [(newcardField, toJSON $ isJust newcard),
+                       (messageField, toJSONT
+                          T.concat ["You discarded a ",
+                                    describeCard oldcard,
+                                    if isJust newcard 
+                                      then " and drew a new card."
+                                      else "."] -- XXX better message, end game
+                      ])
   jsonToRepJson $ object objData
+  where
+    toJSONT :: Text -> Value
+    toJSONT = toJSON

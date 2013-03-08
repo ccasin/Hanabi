@@ -17,7 +17,7 @@ function sendDiscard (n) {
       .removeAttr("onclick")
       .removeClass("clickable");
   }
-  $.post("@{DiscardR}",n);
+  $.post("@{DiscardR}",{#{toJSON cardField}:n});
   var column = getColumn(#{toJSON nm},n);
   column.fadeOut('slow',function () {column.remove()});
 }

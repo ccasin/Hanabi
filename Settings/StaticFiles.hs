@@ -41,11 +41,11 @@ cardToRoute c =
       Card Yellow Three -> img_yellow3_png
       Card Yellow Four  -> img_yellow4_png
       Card Yellow Five  -> img_yellow5_png
-      Card Purple One   -> img_pink1_png
-      Card Purple Two   -> img_pink2_png      
-      Card Purple Three -> img_pink3_png
-      Card Purple Four  -> img_pink4_png
-      Card Purple Five  -> img_pink5_png
+      Card Pink One     -> img_pink1_png
+      Card Pink Two     -> img_pink2_png      
+      Card Pink Three   -> img_pink3_png
+      Card Pink Four    -> img_pink4_png
+      Card Pink Five    -> img_pink5_png
 
 knowledgeToRoute :: Knowledge -> StaticRoute
 knowledgeToRoute k =
@@ -55,7 +55,7 @@ knowledgeToRoute k =
     Knowledge (Is Blue)   _      -> img_bluemystery_png
     Knowledge (Is Green)  _      -> img_greenmystery_png
     Knowledge (Is Yellow) _      -> img_yellowmystery_png
-    Knowledge (Is Purple) _      -> img_pinkmystery_png
+    Knowledge (Is Pink)   _      -> img_pinkmystery_png
     Knowledge _       (Is One)   -> img_mystery1_png
     Knowledge _       (Is Two)   -> img_mystery2_png
     Knowledge _       (Is Three) -> img_mystery3_png

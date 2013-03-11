@@ -16,7 +16,8 @@ import Control.Concurrent.Chan
 import Blaze.ByteString.Builder (fromLazyByteString)
 
 import System.Random (randomRIO)
-import Data.List (foldl')
+import Data.List (foldl',(\\),find)
+-- import qualified Data.Traversable as Trav (mapM)
 
 import Yesod.Auth
 import Network.Wai.EventSource
@@ -32,6 +33,8 @@ import Network.Wai.EventSource
 ---- - xxx names with special characters are not handled correctly
 ----            are things being preescaped by form/db insertion and then it's messed up?
 ---- - xxx figure out when to delete channels
+---- - xxx it would be "easy" for one player to listen to another player's events
+
 
 keyToInt :: GameId -> Int
 keyToInt gid = 
@@ -42,11 +45,27 @@ keyToInt gid =
 ------------------------------------
 ------ Some constant strings -------
 
-cardField,messageField,errorField,newcardField :: Text
-cardField = "card"
-messageField = "msg"
-errorField = "error"
-newcardField = "newcard"
+-- object fields
+
+cardField, messagesField, errorField, newcardField, playerField, discardField, replacecardField  :: Text
+cardField        = "card"           -- Int
+playerField      = "player"    -- Int
+
+discardField     = "discard"        -- object (cardField,playerField,newcardfield (opt))
+
+messagesField    = "msgs"            -- [String]
+errorField       = "error"          -- String
+
+newcardField     = "newcard"        -- Route
+replacecardField = "replacecard"    -- Bool
+
+
+-- css ids
+cardRowID, colorRowID, rankRowID :: Text
+cardRowID  = "CardRow"
+colorRowID = "ColorRow"
+rankRowID  = "RankRow"
+
 
 
 -----------------------------
@@ -81,6 +100,10 @@ deleteChan nm =
        foldl' (\cs (nm',c) -> if nm == nm' then cs else (nm',c):cs)
               []
 
+sendMessage :: ToJSON a => Chan ServerEvent -> a -> Handler ()
+sendMessage chan msg = liftIO $ writeChan chan 
+                     $ ServerEvent Nothing Nothing 
+                       [fromLazyByteString $ encode msg]
 
 --------------------------
 ------ Session stuff -----
@@ -230,8 +253,7 @@ postCreateHanabiR = do
                    , gameDeck     = [] }
   setSession sgameid guid
   lobbyChan <- liftM lobbyChannel getYesod
-  liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $
-     fromLazyByteString $ encode (GameListMsg GLEAddGame guid [nm])
+  sendMessage lobbyChan $ GameListMsg GLEAddGame guid [nm]
   redirect PlayHanabiR
 
 data UnjoinResult =
@@ -266,21 +288,15 @@ postUnjoinHanabiR = do
     UnjoinSuccess guid ps rleader -> 
       do deleteSession sgameid
          let names = map playerName ps
-         liftIO $ writeChan lobbyChan $ 
-            ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
-               encode (GameListMsg GLEUpdatePlayers guid names)
+         sendMessage lobbyChan $ GameListMsg GLEUpdatePlayers guid names
          gchan <- getChannel guid
-         liftIO $ writeChan gchan $ 
-            ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
-               encode (PlayerListMsg (PLELeave rleader) nm names)
+         sendMessage gchan $ PlayerListMsg (PLELeave rleader) nm names
          redirect HanabiLobbyR
     UnjoinFail         -> redirect PlayHanabiR -- XXX maybe I should alert the user or something
     UnjoinEndGame guid ->
       do deleteSession sgameid
          gamesLeft <- liftM null $ runDB $ selectList [GameStatus ==. NotStarted] []
-         liftIO $ writeChan lobbyChan $ ServerEvent Nothing Nothing $ return $ 
-              fromLazyByteString 
-              (encode (GameListMsg (GLEDeleteGame gamesLeft) guid []))
+         sendMessage lobbyChan $ GameListMsg (GLEDeleteGame gamesLeft) guid []
          redirect HanabiLobbyR
 
 data JoinResult = JSuccess [Player]
@@ -307,11 +323,8 @@ postJoinHanabiR guid = do
          lchan <- liftM lobbyChannel getYesod
          setSession sgameid guid
          let names = map playerName ps
-         liftIO $ writeChan gchan $ ServerEvent Nothing Nothing $ return $ 
-               fromLazyByteString $ encode (PlayerListMsg PLEJoin nm names)
-         liftIO $ writeChan lchan $ ServerEvent Nothing Nothing $ return $ 
-               fromLazyByteString $ 
-               encode (GameListMsg GLEUpdatePlayers guid names)
+         sendMessage gchan $ PlayerListMsg PLEJoin nm names
+         sendMessage lchan $ GameListMsg GLEUpdatePlayers guid names
          redirect PlayHanabiR
     JFailGameGone -> -- XXX use somethign better than setmessage
       do setMessage 
@@ -353,10 +366,8 @@ getStartHanabiR = do
     StartNeedPlayers  -> setMessage "Sorry, two players are needed for Hanabi."
     StartSuccess game -> 
       do gchan <- getChannel $ gameUid game
-         liftIO $ writeChan gchan $ 
-            ServerEvent Nothing Nothing $ return $ fromLazyByteString $ 
-               encode (PlayerListMsg PLEStart (gameLeader game) 
-                                     (map playerName $ gamePlayers game))
+         sendMessage gchan $ PlayerListMsg PLEStart (gameLeader game) 
+                                           (map playerName $ gamePlayers game)
   redirect PlayHanabiR
 
                  
@@ -421,6 +432,15 @@ gameWidget game nm = $(widgetFile "game")
     players :: [(Int,Player)]
     players = zip [1..] $ gamePlayers game
 
+    mynum :: Int
+    mynum = 
+      case find ((==nm) . playerName . snd) players of
+         Nothing    -> 0 -- XXX return an error or something
+         Just (n,_) -> n-1
+
+    mychan :: Text
+    mychan = playerChanId (gamePlayers game !! mynum)
+
     numCards :: Int
     numCards = if length players < 4 then 5 else 4
 
@@ -434,13 +454,16 @@ gameWidget game nm = $(widgetFile "game")
 
        rankKnowledge :: [Fact Rank]
        rankKnowledge = map knownRank knowledge
+
+       numText :: Text
+       numText = pack $ show $ pnum - 1
      in
        [whamlet|
-           <div id=#{name} class="curvy">
+           <div id=#{append "player" numText} class="curvy">
              <p>
                <b> #{pnum}. #{name}
-             <table id=#{append name "cards"}>
-               <tr id=#{append name "CardRow"}>
+             <table id=#{append numText "cards"}>
+               <tr id=#{append numText cardRowID}>
                  <td></td>
                  $if nm == name
                    $forall k <- knowledge
@@ -448,11 +471,11 @@ gameWidget game nm = $(widgetFile "game")
                  $else
                    $forall c <- map fst hand
                      <td> <img src=@{StaticR $ cardToRoute c}>
-               <tr id=#{append name "ColorRow"}>
+               <tr id=#{append numText colorRowID}>
                  <td rowspan="2">Knowledge:
                  $forall k <- colorKnowledge
                    <td>#{show k}
-               <tr id=#{append name "KnowledgeRow"}>
+               <tr id=#{append numText rankRowID}>
                  <td class="hidden"></td>
                  $forall k <- rankKnowledge
                    <td>#{show k}
@@ -565,6 +588,15 @@ getGameEventReceiveR guid = do
   res <- lift $ eventSourceAppChan chan req
   sendWaiResponse res
 
+getPlayerEventReceiveR :: Text -> Handler ()
+getPlayerEventReceiveR uid = do
+  chan0 <- getChannel uid
+  chan <- liftIO $ dupChan chan0
+  req <- waiRequest
+  res <- lift $ eventSourceAppChan chan req
+  sendWaiResponse res
+
+
 getLobbyEventReceiveR :: Handler ()
 getLobbyEventReceiveR = do
   chan0 <- liftM lobbyChannel getYesod
@@ -580,28 +612,69 @@ getLobbyEventReceiveR = do
 postDiscardR :: Handler RepJson
 postDiscardR = do
   nm <- requireName
-  card <- runInputPost $ ireq intField cardField
-  objData <- requireGameTransaction (\gid game ->
+  -- remember that any number sent back to javascript will need a +1
+  card <- liftM pred $ runInputPost $ ireq intField cardField
+  $(logDebug) $ pack $ show card
+  discardResult <- requireGameTransaction (\gid game ->
     case gameStatus game of
-      NotStarted  -> return [(errorField,toJSONT "The game isn't running.")]
-      Done        -> return [(errorField,toJSONT "The game has already ended.")]
+      NotStarted  -> return $ Left "The game isn't running."
+      Done        -> return $ Left "The game has already ended."
       Running {currentP} ->
-        let correctPlayer =
-              nm == (playerName $ gamePlayers game !! currentP) in
-        if not correctPlayer then return [(errorField,toJSONT "You aren't the current player.")]
-        else case (discard game card :: Either String (Game,Card,Maybe Card))of
-          Left err -> return [(errorField,toJSON $ pack err)] -- XXX
-          Right (game',oldcard,newcard) -> 
-            do replace gid game' -- XXX send messages to other players
-               return [(newcardField, toJSON $ isJust newcard),
-                       (messageField, toJSONT $
-                          T.concat ["You discarded a ",
-                                    describeCard oldcard,
-                                    if isJust newcard 
-                                      then " and drew a new card."
-                                      else "."]) -- XXX better message, end game
-                      ])
-  jsonToRepJson $ object objData
+        let currentPName = playerName $ gamePlayers game !! currentP
+            correctPlayer = nm == currentPName in
+        if not correctPlayer 
+          then return $ Left "You aren't the current player."
+          else case discard game card of
+            Left err -> return $ Left $ pack err -- XXX, do more in this case?
+            Right (game',oldcard,newcard) -> 
+              do replace gid game' 
+                 return $ Right (currentP,game',oldcard,newcard))
+  -- get the other players channels and send them an update message
+  responseMessage <- case discardResult of
+    Left err -> return [(errorField,toJSONT err)]
+    Right (currentP,game,oldcard,newcard) -> do
+      iochans <- liftM gameChannels getYesod
+      chans <- liftIO $ readIORef iochans
+      routeRenderer <- getUrlRender
+      let currentPlayer :: Player
+          currentPlayer = gamePlayers game !! currentP
+                         
+          otherPlayers :: [Text]
+          otherPlayers = map playerChanId $ gamePlayers game \\ [currentPlayer]
+          playerChans = map (flip lookup chans) otherPlayers
+          newcardRoute = fmap (routeRenderer . StaticR . cardToRoute) newcard
+          -- send msg to other players
+
+          message :: Text
+          message = T.concat [playerName currentPlayer,
+                              " discarded a ",describeCard oldcard,
+                              maybe "" (append " and drew a " . describeCard) newcard,
+                              "."]
+          
+          event :: [(Text,Value)]
+          event = [(discardField,object $
+                         [(playerField,toJSON currentP)
+                         ,(cardField,toJSON (card+1))]
+                      ++ case newcardRoute of
+                           Nothing -> []
+                           Just r  -> [(newcardField,toJSONT r)])
+                  ,(messagesField,toJSON [message])
+                  ]  -- XXX end game message
+
+      mapM_ (maybe (return ()) (flip sendMessage $ object event)) playerChans
+
+
+      return [(replacecardField, toJSON $ isJust newcard)
+             ,(messagesField, toJSON $
+                 [T.concat ["You discarded a ",
+                           describeCard oldcard,
+                           if isJust newcard 
+                             then " and drew a new card."
+                             else "."]]) -- XXX better message, end game
+             ]
+
+  -- send response back to original player
+  jsonToRepJson $ object responseMessage
   where
     toJSONT :: Text -> Value
     toJSONT = toJSON

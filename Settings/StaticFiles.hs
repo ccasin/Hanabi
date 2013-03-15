@@ -18,6 +18,15 @@ staticSite = if development then Static.staticDevel staticDir
 --   accessed this way. You'll have to use their FilePath or URL to access them.
 $(staticFiles Settings.staticDir)
 
+smallColorImage :: Color -> StaticRoute
+smallColorImage c = 
+    case c of
+      Red    -> img_red_small_png
+      Blue   -> img_blue_small_png
+      Green  -> img_green_small_png
+      Yellow -> img_yellow_small_png
+      Pink   -> img_pink_small_png
+
 cardToRoute :: Card -> StaticRoute
 cardToRoute c =
     case c of

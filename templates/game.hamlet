@@ -1,3 +1,16 @@
+<div id="board" class="curvy">
+
+<div id="discards" class="curvy">
+  <p.nobottommargin>
+    <b>Discards:
+  <table class="discardtable">
+    <tr class="discardtable">
+      $forall (c,ds) <- discards
+        <td id=#{discardTableId c} class="discardtable">
+          ^{discardTable c ds}
+        $if (/=) c Pink
+          <td class="discardspace">
+
 <div id="actions" class="curvy">
   <div class="topAction" id="playAction">
     <button type="button" class="actionButton">Play

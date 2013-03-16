@@ -70,10 +70,13 @@ function sendDiscard (n) {
   $.post("@{DiscardR}",{#{toJSON cardField}:n},
          function (data,s,j) {
            if (data.replacecard) {
-             removeCardAddCard(#{toJSON mynum},n,"@{StaticR img_mystery_png}");
+             removeCardAddCard(#{toJSON mynum},n,"@{StaticR img_mystery_small_png}");
            } else {
              removeCard(#{toJSON mynum},n);
-           }
+           };
+
+           delete (data.replacecard);
+           handleEvents (data);
          });
 }
 
@@ -101,12 +104,22 @@ function handleEvents (events) {
     for (var i=0; i < events.messages.length;  i++) {
       displayMessage(events.messages[i]);
     }
+  };
+
+  if ("replacecontent" in events) {
+    var rc = events.replacecontent;
+    for (var i=0; i < rc.length; i++) {
+      $("#"+rc[i].replaceid).html(rc[i].replacedata);
+    }
   }
+
+    
 }
 
 var src = new EventSource("@{PlayerEventReceiveR mychan}");
 src.onmessage = function(msg) {
   var event = JSON.parse(msg.data);
+  console.debug(event);
   handleEvents(event);
 }
 

@@ -14,6 +14,7 @@ import Control.Monad (liftM,when,unless)
 import Control.Concurrent.Chan
 
 import Blaze.ByteString.Builder (fromLazyByteString)
+import Text.Blaze.Html.Renderer.String (renderHtml)
 
 import System.Random (randomRIO)
 import Data.List (foldl',(\\),find)
@@ -53,11 +54,14 @@ toJSONT = toJSON
 
 -- object fields
 
-cardField, messagesField, errorField, newcardField, playerField, discardField, replacecardField  :: Text
+cardField, messagesField, errorField, newcardField, playerField :: Text
+discardField, playField :: Text
+replacecardField, replacecontentField, replaceidField, replacedataField  :: Text
 cardField        = "card"           -- Int
 playerField      = "player"    -- Int
 
 discardField     = "discard"        -- object (cardField,playerField,newcardfield (opt))
+playField        = "play"           -- object (cardField,playerField,newcardfield (opt))
 
 messagesField    = "msgs"            -- [String]
 errorField       = "error"          -- String
@@ -65,6 +69,10 @@ errorField       = "error"          -- String
 newcardField     = "newcard"        -- Route
 replacecardField = "replacecard"    -- Bool
 
+replacecontentField = "replacecontent" -- object (replaceid,replacedata)
+                                       -- an id, and the content
+replaceidField = "replaceid"
+replacedataField = "replacedata"
 
 -- css ids
 cardRowID, colorRowID, rankRowID :: Text
@@ -434,6 +442,26 @@ playerListWidget nm game =
      |]
 
 
+discardTableId :: Color -> Text
+discardTableId c = append (pack $ show c) "discardtable"
+
+discardTable :: Color -> [(Rank,Int)] -> HtmlUrl (Route App)
+discardTable color discards =
+  [hamlet|
+    <table class="discardtable">
+         <tr class="discardrow">
+           <td colspan="2" class="discardimage">
+             <img src=@{StaticR (smallColorImage color)}>
+       $forall r <- [One,Two,Three,Four,Five]
+         <tr class="discardrow">
+           $maybe i <- lookup r discards
+             <td>#{show r ++ "s"}
+             <td>#{i}
+           $nothing
+             <td>
+             <td>
+  |]
+
 gameWidget :: Game -> Text -> Widget
 gameWidget game nm = $(widgetFile "game")
   where
@@ -448,6 +476,9 @@ gameWidget game nm = $(widgetFile "game")
 
     mychan :: Text
     mychan = playerChanId (gamePlayers game !! mynum)
+
+    discards :: [(Color,[(Rank,Int)])]
+    discards = map (\c -> (c,getDiscards game c)) [Red,Blue,Green,Yellow,Pink]
 
     numCards :: Int
     numCards = if length players < 4 then 5 else 4
@@ -501,6 +532,7 @@ getPlayHanabiR = do
       |]
     _ -> defaultLayout $ gameWidget game nm
       -- XXX do I really want all other statuses to display gameWidget?
+      -- XXX check that this player is actually in the game - people could pass around cookies
 
 gameListWidget :: [Entity Game] -> Widget
 gameListWidget games = do
@@ -588,6 +620,16 @@ getHanabiLobbyR =
               <input type=submit value="Create a new game">
       |]
 
+
+-----------------------------------------
+----- Event urls ------------------------
+
+{-
+newtype RepEventSource = RepEventSource Content
+
+instance HasReps RepEventSource where
+  chooseRep (RepEventSource c) = const $ return ("text/event-stream", c)
+-}
 getGameEventReceiveR :: Text -> Handler ()
 getGameEventReceiveR guid = do
   chan0 <- getChannel guid
@@ -603,7 +645,6 @@ getPlayerEventReceiveR uid = do
   req <- waiRequest
   res <- lift $ eventSourceAppChan chan req
   sendWaiResponse res
-
 
 getLobbyEventReceiveR :: Handler ()
 getLobbyEventReceiveR = do
@@ -643,6 +684,7 @@ postDiscardR = do
       iochans <- liftM gameChannels getYesod
       chans <- liftIO $ readIORef iochans
       routeRenderer <- getUrlRender
+      renderParams  <- getUrlRenderParams
       let currentPlayer :: Player
           currentPlayer = gamePlayers game !! currentP -- XXX error
                          
@@ -661,6 +703,18 @@ postDiscardR = do
                   Just c  -> [" and drew a ",
                               if me then "new card" else describeCard c,
                               "."]
+
+          color :: Color
+          color = cardColor oldcard
+                  
+          newDiscardTable :: Text
+          newDiscardTable = pack . renderHtml $ 
+            discardTable color (getDiscards game color) renderParams
+
+          replaceContent = (replacecontentField, toJSON $ map object $
+            [[(replaceidField,toJSON $ discardTableId (cardColor oldcard))
+             ,(replacedataField, toJSON newDiscardTable)]
+            ])
           
           event :: [(Text,Value)]
           event = [(discardField,object $
@@ -670,14 +724,14 @@ postDiscardR = do
                            Nothing -> []
                            Just r  -> [(newcardField,toJSONT r)])
                   ,(messagesField,toJSON [message False])
+                  ,replaceContent
                   ]  -- XXX end game message
 
       mapM_ (maybe (return ()) (flip sendMessage $ object event)) playerChans
 
-
       return [(replacecardField, toJSON $ isJust newcard)
              ,(messagesField, toJSON $ message True)
-                          -- XXX better message, end game
+             ,replaceContent
              ]
 
   -- send response back to original player

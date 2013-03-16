@@ -11,6 +11,7 @@ import Database.Persist.Store
 
 import Data.Aeson.TH
 import Data.Array.IO
+import Data.Maybe (fromMaybe)
 
 import Control.Monad.Error
 
@@ -35,7 +36,7 @@ describeColor Yellow = "yellow (square)"
 describeColor Pink   = "pink (star)"
 
 data Rank  = One | Two | Three | Four | Five
-    deriving (Show,Read,Eq,Enum,Bounded)
+    deriving (Show,Read,Eq,Enum,Bounded,Ord)
 derivePersistField "Rank"
 $(deriveJSON id ''Rank)
 
@@ -107,6 +108,15 @@ derivePersistField "Discards"
 
 share [mkPersist sqlOnlySettings, mkMigrate "migrateAll"]
     $(persistFileWith lowerCaseSettings "config/models")
+
+getDiscards :: Game -> Color -> [(Rank,Int)]
+getDiscards (Game {gameDiscards=Discards d}) c = 
+  fromMaybe [] (lookup c d)
+  {- fmap (sortBy (\a b -> compare (fst a) (fst b))) $ -}
+
+  
+    
+    
 
 
 ----------------

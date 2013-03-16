@@ -1,8 +1,3 @@
-#playerCards {
-  position: absolute;
-  margin-top: 229px;
-}
-
 .clickable {
   cursor: pointer;
 }
@@ -15,12 +10,45 @@ div.curvy {
   padding: 5px;
 }
 
+#board {
+  position:absolute;
+  width:450px;
+  height:150px;
+}
+
+#discards {
+  position:absolute;
+  width:450px;
+  height:150px;
+  margin-left:484px;
+}
+
+
 #actions {
   position:absolute;
   width:350px;
   height:200px;
   margin-right:500px;
-  margin-bottom:200px;
+  margin-top:184px;
+}
+
+
+#chat {
+  position:absolute;
+  width:550px;
+  height:200px;
+  margin-left:384px;
+  margin-top:184px;
+
+}
+
+.nobottommargin {
+  margin-bottom: 0px;
+}
+
+#playerCards {
+  position: absolute;
+  margin-top: 398px;
 }
 
 div.topAction {
@@ -46,11 +74,29 @@ button.actionButton {
   width:75px;
 }
 
-#chat {
-  position:absolute;
-  width:550px;
-  height:200px;
-  margin-left:382px;
-  margin-bottom:200px;
+table.discardtable {
+  width:100%;
+  height:132px;
 }
 
+td.discardtable {
+  width:18%;
+}
+
+td.discardspace {
+  width:2%;
+}
+
+td.discardimage {
+  text-align: center;
+  width:100%;
+  height:20%;
+}
+
+tr.discardtable {
+  height:100%;
+}
+
+tr.discardrow {
+  height:16%;
+}

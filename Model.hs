@@ -112,6 +112,19 @@ share [mkPersist sqlOnlySettings, mkMigrate "migrateAll"]
 ----------------
 --- Hanabi Logic
 
+maxHints :: Int
+maxHints = 8
+
+maxStrikes :: Int
+maxStrikes = 2
+
+removeNth :: MonadError String m => [a] -> Int -> m (a,[a])
+removeNth []     _ = throwError "removeNth out of bounds"
+removeNth (x:xs) 0 = return (x,xs)
+removeNth (x:xs) n = 
+  do (nth,xs') <- removeNth xs (n-1)
+     return (nth,x:xs')
+
 -- a function for working with association lists
 --   use the provided function to update a value.  function must
 --   provide a default value if passed Nothing, in case the key is missing
@@ -168,6 +181,13 @@ drawCard gm =
         next = nextPlayer gm cp
     _ -> throwError "drawCard: Attempted to draw a card from a non-running game."
 
+
+addDiscard :: Discards -> Card -> Discards
+addDiscard (Discards ds) (Card {cardColor,cardRank}) =
+  Discards $ updateAL ds cardColor $
+    maybe [(cardRank,1)]
+          (\rs -> updateAL rs cardRank (maybe 1 succ))
+
 -- Int input is the position in hand of the discarded card.
 -- Returns the updated game, the discarded card, and the drawn card, if there is one.
 discard :: MonadError String m => Game -> Int -> m (Game,Card,Maybe Card)
@@ -179,24 +199,59 @@ discard gm cnum =
              (\p -> do ((c,_),cs) <- removeNth (playerHand p) cnum
                        return (c,p {playerHand=cs}))
          let discards = addDiscard (gameDiscards gm) oldcard
+             hints = 1 + gameHints gm 
          (game,newcard) <- drawCard (gm {gamePlayers=players,
-                                         gameDiscards=discards})
+                                         gameDiscards=discards,
+                                         gameHints=hints})
          return (game,oldcard,newcard)
     _ -> throwError "discard: called during non-running game"
 
-  where
-    removeNth :: MonadError String m => [a] -> Int -> m (a,[a])
-    removeNth []     _ = throwError "discard: removeNth out of bounds"
-    removeNth (x:xs) 0 = return (x,xs)
-    removeNth (x:xs) n = 
-      do (nth,xs') <- removeNth xs (n-1)
-         return (nth,x:xs')
+-- Int input is the position of the played card.
+-- Returns the updated game, whether the play was successful,
+-- the played card, and the drawn card, if there is one.
 
-    addDiscard :: Discards -> Card -> Discards
-    addDiscard (Discards ds) (Card {cardColor,cardRank}) =
-      Discards $ updateAL ds cardColor $
-        maybe [(cardRank,1)]
-              (\rs -> updateAL rs cardRank (maybe 1 succ))
+play :: MonadError String m => Game -> Int -> m (Game,Bool,Card,Maybe Card)
+play gm cnum =
+  case gameStatus gm of
+    (Running {currentP = cp}) ->
+      do (playedcard,players) <-
+           updatePlayer (gamePlayers gm) cp
+             (\p -> do ((c,_),cs) <- removeNth (playerHand p) cnum
+                       return (c,p {playerHand=cs}))
+         let (success,discards,board) = case attemptPlay gm playedcard of
+               Right ds -> (False, ds, gameBoard gm)
+               Left bd -> (True, gameDiscards gm, bd)
+             strikes = (if success then id else (1+)) $ gameStrikes gm
+         if (strikes > maxStrikes)
+           then return (gm {gameStrikes=strikes,gameStatus=Done,
+                            gameDiscards=discards,gameBoard=board,
+                            gamePlayers=players},
+                        False,playedcard,Nothing)
+           else do
+             (game,newcard) <- drawCard (gm {gameStrikes=strikes,
+                                             gameDiscards=discards,
+                                             gamePlayers=players,
+                                             gameBoard=board})
+             return (game,success,playedcard,newcard)
+    _ -> throwError "play: called during non-running game"
+  where
+    nextRank :: Maybe Rank -> Rank -> Bool
+    nextRank Nothing      One   = True
+    nextRank (Just One)   Two   = True
+    nextRank (Just Two)   Three = True
+    nextRank (Just Three) Four  = True
+    nextRank (Just Four)  Five  = True
+    nextRank _            _     = False
+
+    attemptPlay :: Game -> Card -> Either Board Discards
+    attemptPlay (Game {gameBoard=Board board,gameDiscards}) card =
+      if nextRank (lookup color board) rank
+         then Left $ Board $ updateAL board color (const rank)
+         else Right $ addDiscard gameDiscards card
+
+      where
+        color = cardColor card
+        rank  = cardRank card
 
 prettyNameList :: Game -> Text
 prettyNameList g = intercalate ", " $ map playerName $ gamePlayers g

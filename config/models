@@ -12,6 +12,8 @@ Game
   leader    Text
   players   [Player]
   board     Board
+  hints     Int
+  strikes   Int
   discards  Discards
   deck      [Card]
   

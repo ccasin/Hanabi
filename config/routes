@@ -22,3 +22,4 @@
 /dumptables DumpTablesR GET
 
 /discard DiscardR POST
+/play PlayR POST

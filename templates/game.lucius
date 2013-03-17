@@ -87,6 +87,19 @@ td.discardspace {
   width:2%;
 }
 
+table.boardtable {
+  width:100%;
+  height:100px;
+}
+
+td.boardtable {
+  width:18%;
+}
+
+td.boardspace {
+  width:2%;
+}
+
 td.discardimage {
   text-align: center;
   width:100%;

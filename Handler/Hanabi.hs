@@ -445,6 +445,9 @@ playerListWidget nm game =
 discardTableId :: Color -> Text
 discardTableId c = append (pack $ show c) "discardtable"
 
+boardCellId :: Color -> Text
+boardCellId c = append (pack $ show c) "board"
+
 discardTable :: Color -> [(Rank,Int)] -> HtmlUrl (Route App)
 discardTable color discards =
   [hamlet|
@@ -478,7 +481,10 @@ gameWidget game nm = $(widgetFile "game")
     mychan = playerChanId (gamePlayers game !! mynum)
 
     discards :: [(Color,[(Rank,Int)])]
-    discards = map (\c -> (c,getDiscards game c)) [Red,Blue,Green,Yellow,Pink]
+    discards = map (\c -> (c,getDiscards game c)) sortedColors
+
+    board :: [(Color,Rank)]
+    board = (\(Board bd) -> bd) $ gameBoard game
 
     numCards :: Int
     numCards = if length players < 4 then 5 else 4
@@ -742,6 +748,7 @@ postPlayR = do
   nm <- requireName
   -- remember that any number sent back to javascript will need a +1
   card <- liftM pred $ runInputPost $ ireq intField cardField
+  renderParams  <- getUrlRenderParams
   playResult <- requireGameTransaction (\gid game ->
     case gameStatus game of
       NotStarted  -> return $ Left "The game isn't running."
@@ -782,6 +789,25 @@ postPlayR = do
                   Just c  -> [" and drew a ",
                               if me then "new card" else describeCard c,
                               "."]
+          color :: Color
+          color = cardColor oldcard
+
+          newBoardCell :: Text
+          newBoardCell = pack . renderHtml $ [hamlet|
+              <img src=@{StaticR (cardToRoute oldcard)}>
+            |] renderParams
+
+          newDiscardTable :: Text
+          newDiscardTable = pack . renderHtml $ 
+            discardTable color (getDiscards game color) renderParams
+
+          replaceContent = (replacecontentField, toJSON $ map object $
+            if success
+              then [[(replaceidField,toJSON $ boardCellId color)
+                    ,(replacedataField, toJSON newBoardCell)]]
+              else [[(replaceidField,toJSON $ discardTableId color)
+                    ,(replacedataField, toJSON newDiscardTable)]
+                   ])
 
           event :: [(Text,Value)]
           event = [(playField,object $
@@ -791,16 +817,20 @@ postPlayR = do
                            Nothing -> []
                            Just r  -> [(newcardField,toJSONT r)])
                   ,(messagesField,toJSON [message False])
-                  ]  -- XXX end game message
+                  ,replaceContent
+                  ]
+
+
+      -- XXX end game message
 
       mapM_ (maybe (return ()) (flip sendMessage $ object event)) playerChans
 
 
       return [(replacecardField, toJSON $ isJust newcard)
              ,(messagesField, toJSON $ message True)
+             ,replaceContent
               -- XXX better message, end game
              ]
 
   -- send response back to original player
   jsonToRepJson $ object responseMessage
-

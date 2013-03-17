@@ -24,9 +24,12 @@ import System.Random (randomRIO)
 -- http://www.yesodweb.com/book/persistent/
 
 data Color = Red | Blue | Green | Yellow | Pink
-    deriving (Show,Read,Eq,Enum,Bounded)
+    deriving (Show,Read,Eq,Enum,Bounded,Ord)
 derivePersistField "Color"
 $(deriveJSON id ''Color)
+
+sortedColors :: [Color]
+sortedColors = [Red,Blue,Green,Yellow,Pink]
 
 describeColor :: Color -> Text
 describeColor Red    = "red (circle)"

@@ -1,4 +1,14 @@
 <div id="board" class="curvy">
+  <p.nobottommargin>
+    <b>Board:
+  <table class="boardtable">
+    <tr class="boardtable">
+      $forall c <- sortedColors
+        <td id=#{boardCellId c} class="boardtable">
+          $maybe r <- lookup c board
+            <img src=@{StaticR $ cardToRoute (Card c r)}>
+        $if (/=) c Pink
+          <td class="boardspace">
 
 <div id="discards" class="curvy">
   <p.nobottommargin>
@@ -13,7 +23,7 @@
 
 <div id="actions" class="curvy">
   <div class="topAction" id="playAction">
-    <button type="button" class="actionButton">Play
+    <button type="button" class="actionButton" onclick="makePlays ()">Play
   <div class="topAction" id="discardAction">
     <button type="button" class="actionButton" onclick="makeDiscards ()">Discard
   <div class="topAction" id="hintAction">

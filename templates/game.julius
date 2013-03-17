@@ -60,14 +60,13 @@ function displayMessage (msg) {
   return; // XXX
 }
 
-function sendDiscard (n) {
-  console.debug(n);
+function sendEvent (dest,n) {
   for (var i=1; i <= #{toJSON numCards}; i++) {
     getCard(#{toJSON mynum},i)
       .removeAttr("onclick")
       .removeClass("clickable");
   }
-  $.post("@{DiscardR}",{#{toJSON cardField}:n},
+  $.post(dest,{#{toJSON cardField}:n},
          function (data,s,j) {
            if (data.replacecard) {
              removeCardAddCard(#{toJSON mynum},n,"@{StaticR img_mystery_small_png}");
@@ -83,20 +82,35 @@ function sendDiscard (n) {
 function makeDiscards () {
   for (var i=1; i <= #{toJSON numCards}; i++) {
     getCard(#{toJSON mynum},i)
-      .attr("onclick","sendDiscard ("+i+")")
+      .attr("onclick","sendEvent (\"@{DiscardR}\","+i+")")
+      .addClass("clickable");
+  }
+}
+
+function makePlays () {
+  for (var i=1; i <= #{toJSON numCards}; i++) {
+    getCard(#{toJSON mynum},i)
+      .attr("onclick","sendEvent (\"@{PlayR}\","+i+")")
       .addClass("clickable");
   }
 }
 
 function handleEvents (events) {
   if ("discard" in events) {
-    if ("newcard" in events.discard) {
-      removeCardAddCard(events.discard.player,
-                        events.discard.card,
-                        events.discard.newcard);
+    var dc = events.discard;
+    if ("newcard" in dc) {
+      removeCardAddCard(dc.player, dc.card, dc.newcard);
     } else {
-      removeCard(events.discard.player,
-                 events.discard.card);
+      removeCard(dc.player, dc.card);
+    }
+  };
+
+  if ("play" in events) {
+    var p = events.play;
+    if ("newcard" in p) {
+      removeCardAddCard(p.player, p.card, p.newcard);
+    } else {
+      removeCard(p.player, p.card);
     }
   };
 
@@ -119,7 +133,6 @@ function handleEvents (events) {
 var src = new EventSource("@{PlayerEventReceiveR mychan}");
 src.onmessage = function(msg) {
   var event = JSON.parse(msg.data);
-  console.debug(event);
   handleEvents(event);
 }
 

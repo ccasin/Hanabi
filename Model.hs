@@ -223,6 +223,9 @@ discard gm cnum =
 -- Returns the updated game, whether the play was successful,
 -- the played card, and the drawn card, if there is one.
 
+
+-- XXX hint back on 5
+-- XXX end game on 25
 play :: MonadError String m => Game -> Int -> m (Game,Bool,Card,Maybe Card)
 play gm cnum =
   case gameStatus gm of

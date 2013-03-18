@@ -1,4 +1,13 @@
-module Handler.Hanabi where
+module Handler.Hanabi 
+  (getHanabiLobbyR,getPlayHanabiR,getStartHanabiR
+  ,postCreateHanabiR,postJoinHanabiR,postUnjoinHanabiR
+  ,getGameEventReceiveR,getLobbyEventReceiveR,getPlayerEventReceiveR
+  ,getSetNameR,postSetNameR
+  ,getDumpTablesR  -- XXX
+  ,postDiscardR,postPlayR)
+   
+
+where
 
 import Import
 
@@ -17,7 +26,7 @@ import Blaze.ByteString.Builder (fromLazyByteString)
 import Text.Blaze.Html.Renderer.String (renderHtml)
 
 import System.Random (randomRIO)
-import Data.List (foldl',(\\),find)
+import Data.List (foldl',find)
 -- import qualified Data.Traversable as Trav (mapM)
 
 import Yesod.Auth
@@ -742,8 +751,14 @@ postDiscardR =
           discardTable color (getDiscards g color) renderParams
 
         replaceContent = (replacecontentField, toJSON $ map object $
-          [[(replaceidField,toJSON $ discardTableId (cardColor oldcard))
-           ,(replacedataField, toJSON newDiscardTable)]
+          [ [(replaceidField,toJSON $ discardTableId (cardColor oldcard))
+            ,(replacedataField, toJSON newDiscardTable)]
+           ,[(replaceidField,toJSONT "hintstd")
+            ,(replacedataField, toJSONT $ 
+                append "<b>Hints:</b> " (pack $ show $ gameHints g))]
+           ,[(replaceidField,toJSONT "decksizetd")
+            ,(replacedataField, toJSONT $ 
+                append "<b>Deck:</b> " (pack $ show $ length $ gameDeck g))]
           ])
       return (\me ->
         [(discardField,object $
@@ -806,12 +821,23 @@ postPlayR =
           discardTable color (getDiscards g color) renderParams
 
         replaceContent = (replacecontentField, toJSON $ map object $
-          if success
-            then [[(replaceidField,toJSON $ boardCellId color)
-                  ,(replacedataField, toJSON newBoardCell)]]
-            else [[(replaceidField,toJSON $ discardTableId color)
-                  ,(replacedataField, toJSON newDiscardTable)]
-                 ])
+            (if success
+              then [(replaceidField,toJSON $ boardCellId color)
+                    ,(replacedataField, toJSON newBoardCell)]
+              else [(replaceidField,toJSON $ discardTableId color)
+                    ,(replacedataField, toJSON newDiscardTable)])
+                   
+          : [[(replaceidField,toJSONT "hintstd")
+             ,(replacedataField, toJSONT $ 
+                 append "<b>Hints:</b> " (pack $ show $ gameHints g))]
+            ,[(replaceidField,toJSONT "decksizetd")
+             ,(replacedataField, toJSONT $ 
+                 append "<b>Deck:</b> " (pack $ show $ length $ gameDeck g))]
+            ,[(replaceidField,toJSONT "strikestd")
+             ,(replacedataField, toJSONT $ 
+                 append "<b>Strikes:</b> " (pack $ show $ gameStrikes g))]
+              ])
+
       return (\me ->
         [(playField,object $
               [(playerField,toJSON currentP)

@@ -96,6 +96,8 @@ function makePlays () {
 }
 
 function handleEvents (events) {
+  console.debug(events);
+
   if ("discard" in events) {
     var dc = events.discard;
     if ("newcard" in dc) {

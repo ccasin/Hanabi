@@ -9,6 +9,13 @@
             <img src=@{StaticR $ cardToRoute (Card c r)}>
         $if (/=) c Pink
           <td class="boardspace">
+    <tr>
+      <td colspan="2" id="hintstd">
+        <b>Hints:</b> #{gameHints game}
+      <td colspan="2" id="strikestd">
+        <b>Strikes:</b> #{gameStrikes game}
+      <td id="decksizetd">
+        <b>Deck:</b> #{length $ gameDeck game}
 
 <div id="discards" class="curvy">
   <p.nobottommargin>

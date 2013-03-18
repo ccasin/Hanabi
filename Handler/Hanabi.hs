@@ -2,7 +2,7 @@ module Handler.Hanabi where
 
 import Import
 
-import Data.Maybe (isJust)
+import Data.Maybe (isJust,fromMaybe)
 import Data.IORef
 import Data.Text (pack,append,strip)
 import qualified Data.Text as T (concat,length)
@@ -56,7 +56,7 @@ toJSONT = toJSON
 
 cardField, messagesField, errorField, newcardField, playerField :: Text
 discardField, playField :: Text
-replacecardField, replacecontentField, replaceidField, replacedataField  :: Text
+replacecontentField, replaceidField, replacedataField  :: Text
 cardField        = "card"           -- Int
 playerField      = "player"    -- Int
 
@@ -67,7 +67,6 @@ messagesField    = "msgs"            -- [String]
 errorField       = "error"          -- String
 
 newcardField     = "newcard"        -- Route
-replacecardField = "replacecard"    -- Bool
 
 replacecontentField = "replacecontent" -- object (replaceid,replacedata)
                                        -- an id, and the content
@@ -664,173 +663,161 @@ getLobbyEventReceiveR = do
 ---------------------------------------
 ----- Game event handlers (AJAX) ------
 
-postDiscardR :: Handler RepJson
-postDiscardR = do
+postActionHandler :: FormInput App App a 
+                  -> (a -> Game -> Either String (Game,b))
+                  -> (Game -> Int -> b -> Handler (Maybe Text -> [(Text,Value)]))
+                             -- int is current player
+                  -> Handler RepJson
+postActionHandler inputform attemptaction handleresult = do
   nm <- requireName
   -- remember that any number sent back to javascript will need a +1
-  card <- liftM pred $ runInputPost $ ireq intField cardField
-  discardResult <- requireGameTransaction (\gid game ->
+  content <- runInputPost inputform
+  (g,result) <- requireGameTransaction (\gid game ->
     case gameStatus game of
-      NotStarted  -> return $ Left "The game isn't running."
-      Done        -> return $ Left "The game has already ended."
+      NotStarted  -> return $ (game,Left "The game isn't running.")
+      Done        -> return $ (game,Left "The game has already ended.")
       Running {currentP} ->
         let currentPName = playerName $ gamePlayers game !! currentP
             correctPlayer = nm == currentPName in
         if not correctPlayer 
-          then return $ Left "You aren't the current player."
-          else case discard game card of
-            Left err -> return $ Left $ pack err -- XXX, do more in this case?
-            Right (game',oldcard,newcard) -> 
-              do replace gid game' 
-                 return $ Right (currentP,game',oldcard,newcard))
-  -- get the other players channels and send them an update message
-  responseMessage <- case discardResult of
-    Left err -> return [(errorField,toJSONT err)]
-    Right (currentP,game,oldcard,newcard) -> do
-      iochans <- liftM gameChannels getYesod
-      chans <- liftIO $ readIORef iochans
+          then return $ (game,Left "You aren't the current player.")
+          else case attemptaction content game of
+            Left err    -> return $ (game,Left $ pack err)
+            Right (g,b) -> do replace gid g
+                              return $ (g,Right (currentP,b)))
+  messages <- 
+    case result of 
+      Left err -> return $ const [(errorField,toJSONT err)]
+      Right (cp,b)  -> handleresult g cp b
+  iochans <- liftM gameChannels getYesod
+  chans <- liftIO $ readIORef iochans
+  let otherPlayers :: [Text]
+      otherPlayers = map playerChanId $
+         filter ((/= nm) . playerName) $ gamePlayers g
+      playerChans = map (flip lookup chans) otherPlayers -- XXX log if any nothings?
+  mapM_ (maybe (return ()) (flip sendMessage $ object (messages $ Just nm))) playerChans
+  jsonToRepJson $ object $ messages Nothing
+        
+
+postDiscardR :: Handler RepJson
+postDiscardR = 
+  let
+    inputForm :: FormInput App App Int
+    inputForm = ireq intField cardField
+
+    attemptAction :: Int -> Game -> Either String (Game,(Int,Card,Maybe Card))
+    attemptAction card g =
+      case discard g (pred card) of
+        Left err -> Left err
+        Right (g',oldcard,newcard) -> Right (g',(card,oldcard,newcard))
+
+    handleResult :: Game -> Int -> (Int,Card,Maybe Card) 
+                 -> Handler (Maybe Text -> [(Text,Value)])
+    handleResult g currentP (oldcardi,oldcard,newcard) = do
       routeRenderer <- getUrlRender
       renderParams  <- getUrlRenderParams
-      let currentPlayer :: Player
-          currentPlayer = gamePlayers game !! currentP -- XXX error
-                         
-          otherPlayers :: [Text]
-          otherPlayers = map playerChanId $ gamePlayers game \\ [currentPlayer]
-          playerChans = map (flip lookup chans) otherPlayers -- XXX log if any nothings?
-          newcardRoute = fmap (routeRenderer . StaticR . cardToRoute) newcard
-          -- send msg to other players
+      let
+        message :: Maybe Text -> Text
+        message me = T.concat $
+             [fromMaybe "You" me," discarded a ",describeCard oldcard]
+          ++ case newcard of
+               Nothing -> ["."]
+               Just c  -> [" and drew a ",
+                           if isJust me then describeCard c else "new card",
+                           "."]
 
-          message :: Bool -> Text
-          message me = T.concat $ 
-               [if me then "You" else playerName currentPlayer,
-                " discarded a ",describeCard oldcard]
-             ++ case newcard of
-                  Nothing -> ["."]
-                  Just c  -> [" and drew a ",
-                              if me then "new card" else describeCard c,
-                              "."]
+        newcardRoute :: Maybe Text -> Maybe Text
+        newcardRoute me = 
+          fmap (if isJust me 
+                  then routeRenderer . StaticR . cardToRoute
+                  else const $ routeRenderer . StaticR $
+                         knowledgeToRoute (Knowledge Mystery Mystery))
+          newcard
 
-          color :: Color
-          color = cardColor oldcard
-                  
-          newDiscardTable :: Text
-          newDiscardTable = pack . renderHtml $ 
-            discardTable color (getDiscards game color) renderParams
+        color :: Color
+        color = cardColor oldcard
+                
+        newDiscardTable :: Text
+        newDiscardTable = pack . renderHtml $ 
+          discardTable color (getDiscards g color) renderParams
 
-          replaceContent = (replacecontentField, toJSON $ map object $
-            [[(replaceidField,toJSON $ discardTableId (cardColor oldcard))
-             ,(replacedataField, toJSON newDiscardTable)]
-            ])
-          
-          event :: [(Text,Value)]
-          event = [(discardField,object $
-                         [(playerField,toJSON currentP)
-                         ,(cardField,toJSON (card+1))]
-                      ++ case newcardRoute of
-                           Nothing -> []
-                           Just r  -> [(newcardField,toJSONT r)])
-                  ,(messagesField,toJSON [message False])
-                  ,replaceContent
-                  ]  -- XXX end game message
-
-      mapM_ (maybe (return ()) (flip sendMessage $ object event)) playerChans
-
-      return [(replacecardField, toJSON $ isJust newcard)
-             ,(messagesField, toJSON $ message True)
-             ,replaceContent
-             ]
-
-  -- send response back to original player
-  jsonToRepJson $ object responseMessage
+        replaceContent = (replacecontentField, toJSON $ map object $
+          [[(replaceidField,toJSON $ discardTableId (cardColor oldcard))
+           ,(replacedataField, toJSON newDiscardTable)]
+          ])
+      return (\me ->
+        [(discardField,object $
+              [(playerField,toJSON currentP)
+              ,(cardField,toJSON (oldcardi))]
+           ++ maybe [] (\r -> [(newcardField, toJSONT r)]) (newcardRoute me))
+        ,(messagesField,toJSON [message me])
+        ,replaceContent])
+  in
+    postActionHandler inputForm attemptAction handleResult
 
 postPlayR :: Handler RepJson
-postPlayR = do
-  nm <- requireName
-  -- remember that any number sent back to javascript will need a +1
-  card <- liftM pred $ runInputPost $ ireq intField cardField
-  renderParams  <- getUrlRenderParams
-  playResult <- requireGameTransaction (\gid game ->
-    case gameStatus game of
-      NotStarted  -> return $ Left "The game isn't running."
-      Done        -> return $ Left "The game has already ended."
-      Running {currentP} ->
-        let currentPName = playerName $ gamePlayers game !! currentP
-            correctPlayer = nm == currentPName in
-        if not correctPlayer 
-          then return $ Left "You aren't the current player."
-          else case play game card of
-            Left err -> return $ Left $ pack err -- XXX, do more in this case?
-            Right (game',success,oldcard,newcard) -> 
-              do replace gid game' 
-                 return $ Right (currentP,game',success,oldcard,newcard))
-  -- get the other players channels and send them an update message
-  responseMessage <- case playResult of
-    Left err -> return [(errorField,toJSONT err)]
-    Right (currentP,game,success,oldcard,newcard) -> do
-      iochans <- liftM gameChannels getYesod
-      chans <- liftIO $ readIORef iochans
+postPlayR = 
+  let
+    inputForm :: FormInput App App Int
+    inputForm = ireq intField cardField
+
+    attemptAction :: Int -> Game
+                  -> Either String (Game,(Int,Bool,Card,Maybe Card))
+    attemptAction card g =
+      case play g (pred card) of
+        Left err -> Left err
+        Right (g',success,oldcard,newcard) -> Right (g',(card,success,oldcard,newcard))
+
+    handleResult :: Game -> Int -> (Int,Bool,Card,Maybe Card) 
+                 -> Handler (Maybe Text -> [(Text,Value)])
+    handleResult g currentP (oldcardi,success,oldcard,newcard) = do
       routeRenderer <- getUrlRender
-      let currentPlayer :: Player
-          currentPlayer = gamePlayers game !! currentP -- XXX error
-                         
-          otherPlayers :: [Text]
-          otherPlayers = map playerChanId $ gamePlayers game \\ [currentPlayer]
-          playerChans = map (flip lookup chans) otherPlayers -- XXX log if any nothings?
-          newcardRoute = fmap (routeRenderer . StaticR . cardToRoute) newcard
-          -- send msg to other players
+      renderParams  <- getUrlRenderParams
+      let
+        message :: Maybe Text -> Text
+        message me = T.concat $ (fromMaybe "You" me) :
+              if success 
+                 then [" played a ",describeCard oldcard]
+                 else [" tried to play a ",describeCard oldcard,", causing a strike, "]
+           ++ case newcard of
+                Nothing -> ["."]
+                Just c  -> [" and drew a ",
+                            if isJust me then "new card" else describeCard c,
+                            "."]
 
-          message :: Bool -> Text
-          message me = T.concat $ (if me then "You" else playerName currentPlayer) :
-                if success 
-                   then [" played a ",describeCard oldcard]
-                   else [" tried to play a ",describeCard oldcard,", causing a strike, "]
-             ++ case newcard of
-                  Nothing -> ["."]
-                  Just c  -> [" and drew a ",
-                              if me then "new card" else describeCard c,
-                              "."]
-          color :: Color
-          color = cardColor oldcard
+        newcardRoute :: Maybe Text -> Maybe Text
+        newcardRoute me = 
+          fmap (if isJust me 
+                  then routeRenderer . StaticR . cardToRoute
+                  else const $ routeRenderer . StaticR $
+                         knowledgeToRoute (Knowledge Mystery Mystery))
+          newcard
 
-          newBoardCell :: Text
-          newBoardCell = pack . renderHtml $ [hamlet|
-              <img src=@{StaticR (cardToRoute oldcard)}>
-            |] renderParams
+        color :: Color
+        color = cardColor oldcard
+                
+        newBoardCell :: Text
+        newBoardCell = pack . renderHtml $ [hamlet|
+            <img src=@{StaticR (cardToRoute oldcard)}>
+          |] renderParams
 
-          newDiscardTable :: Text
-          newDiscardTable = pack . renderHtml $ 
-            discardTable color (getDiscards game color) renderParams
+        newDiscardTable :: Text
+        newDiscardTable = pack . renderHtml $ 
+          discardTable color (getDiscards g color) renderParams
 
-          replaceContent = (replacecontentField, toJSON $ map object $
-            if success
-              then [[(replaceidField,toJSON $ boardCellId color)
-                    ,(replacedataField, toJSON newBoardCell)]]
-              else [[(replaceidField,toJSON $ discardTableId color)
-                    ,(replacedataField, toJSON newDiscardTable)]
-                   ])
-
-          event :: [(Text,Value)]
-          event = [(playField,object $
-                         [(playerField,toJSON currentP)
-                         ,(cardField,toJSON (card+1))]
-                      ++ case newcardRoute of
-                           Nothing -> []
-                           Just r  -> [(newcardField,toJSONT r)])
-                  ,(messagesField,toJSON [message False])
-                  ,replaceContent
-                  ]
-
-
-      -- XXX end game message
-
-      mapM_ (maybe (return ()) (flip sendMessage $ object event)) playerChans
-
-
-      return [(replacecardField, toJSON $ isJust newcard)
-             ,(messagesField, toJSON $ message True)
-             ,replaceContent
-              -- XXX better message, end game
-             ]
-
-  -- send response back to original player
-  jsonToRepJson $ object responseMessage
+        replaceContent = (replacecontentField, toJSON $ map object $
+          if success
+            then [[(replaceidField,toJSON $ boardCellId color)
+                  ,(replacedataField, toJSON newBoardCell)]]
+            else [[(replaceidField,toJSON $ discardTableId color)
+                  ,(replacedataField, toJSON newDiscardTable)]
+                 ])
+      return (\me ->
+        [(playField,object $
+              [(playerField,toJSON currentP)
+              ,(cardField,toJSON (oldcardi))]
+           ++ maybe [] (\r -> [(newcardField, toJSONT r)]) (newcardRoute me))
+        ,(messagesField,toJSON [message me])
+        ,replaceContent])
+  in
+    postActionHandler inputForm attemptAction handleResult

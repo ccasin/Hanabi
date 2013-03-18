@@ -68,13 +68,13 @@ function sendEvent (dest,n) {
   }
   $.post(dest,{#{toJSON cardField}:n},
          function (data,s,j) {
-           if (data.replacecard) {
-             removeCardAddCard(#{toJSON mynum},n,"@{StaticR img_mystery_small_png}");
-           } else {
-             removeCard(#{toJSON mynum},n);
-           };
-
-           delete (data.replacecard);
+//           if (data.replacecard) {
+//             removeCardAddCard(#{toJSON mynum},n,"@{StaticR img_mystery_small_png}");
+//           } else {
+//             removeCard(#{toJSON mynum},n);
+//           };
+//
+//           delete (data.replacecard);
            handleEvents (data);
          });
 }

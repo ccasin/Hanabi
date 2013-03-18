@@ -89,6 +89,9 @@ td.discardspace {
 
 table.boardtable {
   width:100%;
+}
+
+tr.boardtable {
   height:100px;
 }
 

@@ -1,17 +1,14 @@
-// cards are 1-indexed in the javascript.  plus there is an extra td
-// at the front of each row, so the first card for each player is
-// actually the second child of the table row.
+// cards are 1-indexed in the javascript.
 
 function removeCardAddCard (player,col,cardPath) {
-  var index = col+1;
   var cardRow = $("#"+player+#{toJSON cardRowID});
-  var card = cardRow.children("td:nth-child("+index+")");
+  var card = cardRow.children("td:nth-child("+col+")");
 
   var colorRow = $("#"+player+#{toJSON colorRowID});
-  var color = colorRow.children("td:nth-child("+index+")");
+  var color = colorRow.children("td:nth-child("+col+")");
 
   var rankRow = $("#"+player+#{toJSON rankRowID});
-  var rank = rankRow.children("td:nth-child("+index+")");
+  var rank = rankRow.children("td:nth-child("+col+")");
 
   var newcardtd = $('<td>').addClass("hidden").append($('<img>').attr("src",cardPath));
   var newcolortd = $('<td>').addClass("hidden").html("Mystery");
@@ -36,15 +33,14 @@ function removeCardAddCard (player,col,cardPath) {
 }
 
 function removeCard (player,col) {
-  var index = col+1;
   var cardRow = $("#"+player+#{toJSON cardRowID});
-  var card = cardRow.children("td:nth-child("+index+")");
+  var card = cardRow.children("td:nth-child("+col+")");
 
   var colorRow = $("#"+player+#{toJSON colorRowID});
-  var color = colorRow.children("td:nth-child("+index+")");
+  var color = colorRow.children("td:nth-child("+col+")");
 
   var rankRow = $("#"+player+#{toJSON rankRowID});
-  var rank = rankRow.children("td:nth-child("+index+")");
+  var rank = rankRow.children("td:nth-child("+col+")");
 
   card.fadeOut('slow',function () {card.remove()});
   color.fadeOut('slow',function () {color.remove()});
@@ -52,8 +48,7 @@ function removeCard (player,col) {
 }
 
 function getCard (player,col) {
-  var index = col+1; // since there is an empty td at the front of the row
-  return $("#"+player+"CardRow>td:nth-child("+index+")>img");
+  return $("#"+player+"CardRow>td:nth-child("+col+")>img");
 }
 
 function displayMessage (msg) {
@@ -68,13 +63,6 @@ function sendEvent (dest,n) {
   }
   $.post(dest,{#{toJSON cardField}:n},
          function (data,s,j) {
-//           if (data.replacecard) {
-//             removeCardAddCard(#{toJSON mynum},n,"@{StaticR img_mystery_small_png}");
-//           } else {
-//             removeCard(#{toJSON mynum},n);
-//           };
-//
-//           delete (data.replacecard);
            handleEvents (data);
          });
 }

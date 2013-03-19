@@ -3,7 +3,7 @@
     <b>Board:
   <table class="boardtable">
     <tr class="boardtable">
-      $forall c <- sortedColors
+      $forall c <- allHints
         <td id=#{boardCellId c} class="boardtable">
           $maybe r <- lookup c board
             <img src=@{StaticR $ cardToRoute (Card c r)}>

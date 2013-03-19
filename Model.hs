@@ -12,6 +12,7 @@ import Database.Persist.Store
 import Data.Aeson.TH
 import Data.Array.IO
 import Data.Maybe (fromMaybe)
+import Data.List ((\\))
 
 import Control.Monad.Error
 
@@ -23,32 +24,46 @@ import System.Random (randomRIO)
 -- at:
 -- http://www.yesodweb.com/book/persistent/
 
+class Eq a => Hintable a where
+  describe :: a -> Text
+  allHints :: [a]
+
 data Color = Red | Blue | Green | Yellow | Pink
     deriving (Show,Read,Eq,Enum,Bounded,Ord)
 derivePersistField "Color"
 $(deriveJSON id ''Color)
 
-sortedColors :: [Color]
-sortedColors = [Red,Blue,Green,Yellow,Pink]
+instance Hintable Color where
+  allHints = [Red,Blue,Green,Yellow,Pink]
 
-describeColor :: Color -> Text
-describeColor Red    = "red (circle)"
-describeColor Blue   = "blue (triangle)"
-describeColor Green  = "green (diamond)"
-describeColor Yellow = "yellow (square)"
-describeColor Pink   = "pink (star)"
+  describe Red    = "red (circle)"
+  describe Blue   = "blue (triangle)"
+  describe Green  = "green (diamond)"
+  describe Yellow = "yellow (square)"
+  describe Pink   = "pink (star)"
 
 data Rank  = One | Two | Three | Four | Five
     deriving (Show,Read,Eq,Enum,Bounded,Ord)
 derivePersistField "Rank"
 $(deriveJSON id ''Rank)
 
-describeRank :: Rank -> Text
-describeRank One = "1"
-describeRank Two = "2"
-describeRank Three = "3"
-describeRank Four = "4"
-describeRank Five = "5"
+instance Hintable Rank where
+  allHints = [One,Two,Three,Four,Five]
+
+  describe One = "1"
+  describe Two = "2"
+  describe Three = "3"
+  describe Four = "4"
+  describe Five = "5"
+
+rankScore :: Rank -> Int
+rankScore One   = 1
+rankScore Two   = 2
+rankScore Three = 3
+rankScore Four  = 4
+rankScore Five  = 5
+
+
 
 data Card  = Card {cardColor :: Color, cardRank :: Rank}
     deriving (Show,Read,Eq)
@@ -57,7 +72,7 @@ $(deriveJSON (drop 4) ''Card)
 
 describeCard :: Card -> Text
 describeCard (Card {cardColor,cardRank})
-  = T.concat [describeColor cardColor," ",describeRank cardRank]
+  = T.concat [describe cardColor," ",describe cardRank]
 
 data Fact a = Mystery | Isnt [a] | Is a
     deriving (Show,Read,Eq)
@@ -117,13 +132,16 @@ getDiscards (Game {gameDiscards=Discards d}) c =
   fromMaybe [] (lookup c d)
   {- fmap (sortBy (\a b -> compare (fst a) (fst b))) $ -}
 
-  
-    
-    
 
 
 ----------------
 --- Hanabi Logic
+
+scoreBoard :: Board -> Int
+scoreBoard (Board b) = sum $ map (\(_,r) -> rankScore r) b
+
+scoreGame :: Game -> Int
+scoreGame game = scoreBoard $ gameBoard game
 
 maxHints :: Int
 maxHints = 8
@@ -222,10 +240,6 @@ discard gm cnum =
 -- Int input is the position of the played card.
 -- Returns the updated game, whether the play was successful,
 -- the played card, and the drawn card, if there is one.
-
-
--- XXX hint back on 5
--- XXX end game on 25
 play :: MonadError String m => Game -> Int -> m (Game,Bool,Card,Maybe Card)
 play gm cnum =
   case gameStatus gm of
@@ -238,15 +252,18 @@ play gm cnum =
                Right ds -> (False, ds, gameBoard gm)
                Left bd -> (True, gameDiscards gm, bd)
              strikes = (if success then id else (1+)) $ gameStrikes gm
-         if (strikes > maxStrikes)
+             hints = (if success && (cardRank playedcard == Five)
+                         then (+1) else id) $ gameHints gm
+         if (strikes > maxStrikes || scoreBoard board == 25)
            then return (gm {gameStrikes=strikes,gameStatus=Done,
                             gameDiscards=discards,gameBoard=board,
                             gamePlayers=players},
-                        False,playedcard,Nothing)
+                        success,playedcard,Nothing)
            else do
              (game,newcard) <- drawCard (gm {gameStrikes=strikes,
                                              gameDiscards=discards,
                                              gamePlayers=players,
+                                             gameHints=hints,
                                              gameBoard=board})
              return (game,success,playedcard,newcard)
     _ -> throwError "play: called during non-running game"
@@ -268,6 +285,60 @@ play gm cnum =
       where
         color = cardColor card
         rank  = cardRank card
+
+-- Takes in the player the hint is being given to and what the hint is
+-- Returns the updated game and a list of each card about which there is
+--   new, positive info (to update the display)
+hint :: MonadError String m => Game -> Int -> Either Color Rank
+     -> m (Game,[Int])
+hint gm hp hintinfo = 
+  case (gameStatus gm, hints > 0) of
+    (gs@Running {currentP = cp},True) ->
+       do (upCards,players) <-
+              updatePlayer (gamePlayers gm) hp (return . updateP)
+          return (gm {gameStatus=gs {currentP=nextPlayer gm cp}
+                     ,gameHints = hints - 1
+                     ,gamePlayers=players},
+                  upCards)
+    (_,False) -> throwError "hint: no hints left"
+    (_,_) -> throwError "hint: called during non-running game"
+  where
+    hints = gameHints gm
+
+    updateP :: Player -> ([Int],Player)
+    updateP p =
+        let (hand,newknown) = updateHand $ playerHand p
+        in (newknown,p {playerHand=hand})
+
+    updateHand :: [(Card,Knowledge)] -> ([(Card,Knowledge)],[Int])
+    updateHand hand = updateHandCount 0 hand
+      where
+        updateHandCount :: Int -> [(Card,Knowledge)] -> ([(Card,Knowledge)],[Int])
+        updateHandCount _ []        = ([],[])
+        updateHandCount n ((c,k):h) =
+          let
+            (h',updates) = updateHandCount (n+1) h
+            (k',elementknown)  = updateCard c k
+          in ((c,k'):h', if elementknown then n:updates else updates)
+
+    updateCard :: Card -> Knowledge -> (Knowledge,Bool)
+    updateCard card k =
+      case hintinfo of
+        Left  c -> let (f,b) = updateK (cardColor card) c (knownColor k) in
+                     (k {knownColor=f},b)
+        Right r -> let (f,b) = updateK (cardRank card) r (knownRank k) in
+                     (k {knownRank=f},b)
+      where
+        updateK :: Hintable a => a -> a -> Fact a -> (Fact a,Bool)
+        updateK _     _     (Is a)    = (Is a,False)
+        updateK carda hinta Mystery   =
+          if carda == hinta then (Is carda,True) else (Isnt [hinta],False)
+        updateK carda hinta (Isnt as) =
+            case (carda == hinta, hinta `elem` as, allHints \\ (hinta:as)) of
+              (True ,_    ,_   ) -> (Is carda,True)
+              (False,True ,_   ) -> (Isnt as,False)
+              (False,False,[a']) -> (Is a', True)
+              (False,False,_   ) -> (Isnt (hinta:as),False)
 
 prettyNameList :: Game -> Text
 prettyNameList g = intercalate ", " $ map playerName $ gamePlayers g

@@ -116,3 +116,11 @@ tr.discardtable {
 tr.discardrow {
   height:16%;
 }
+
+tr.knowledgerow {
+  height:20px;
+}
+
+td.knowledgecell {
+  height:20px;
+}

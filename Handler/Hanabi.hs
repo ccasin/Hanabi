@@ -1,4 +1,4 @@
-module Handler.Hanabi 
+ module Handler.Hanabi 
   (getHanabiLobbyR,getPlayHanabiR,getStartHanabiR
   ,postCreateHanabiR,postJoinHanabiR,postUnjoinHanabiR
   ,getGameEventReceiveR,getLobbyEventReceiveR,getPlayerEventReceiveR
@@ -26,7 +26,7 @@ import Blaze.ByteString.Builder (fromLazyByteString)
 import Text.Blaze.Html.Renderer.String (renderHtml)
 
 import System.Random (randomRIO)
-import Data.List (foldl',find)
+import Data.List (foldl',find,(\\))
 -- import qualified Data.Traversable as Trav (mapM)
 
 import Yesod.Auth
@@ -473,6 +473,25 @@ discardTable color discards =
              <td>
   |]
 
+knowledgeRow :: Hintable a => (a -> HtmlUrl (Route App)) -> [Fact a] -> HtmlUrl (Route App)
+knowledgeRow disp ks = [hamlet|
+    $forall f <- ks
+      <td class="knowledgecell">
+        ^{dispKnowledge disp f}
+  |]
+  where
+    dispKnowledge :: Hintable a => (a -> HtmlUrl (Route App)) 
+                                -> Fact a -> HtmlUrl (Route App)
+    dispKnowledge d (Is a)    = d a
+    dispKnowledge _ Mystery   = [hamlet| |]
+    dispKnowledge d (Isnt nots) =
+      if length nots > 2 then list (allHints \\ nots)
+                         else [hamlet|not ^{list nots}|]
+      where
+        list []     = [hamlet| |]
+        list [a]    = d a
+        list (a:as) = [hamlet| ^{d a} or ^{list as} \|]
+
 gameWidget :: Game -> Text -> Widget
 gameWidget game nm = $(widgetFile "game")
   where
@@ -489,7 +508,7 @@ gameWidget game nm = $(widgetFile "game")
     mychan = playerChanId (gamePlayers game !! mynum)
 
     discards :: [(Color,[(Rank,Int)])]
-    discards = map (\c -> (c,getDiscards game c)) sortedColors
+    discards = map (\c -> (c,getDiscards game c)) allHints
 
     board :: [(Color,Rank)]
     board = (\(Board bd) -> bd) $ gameBoard game
@@ -502,11 +521,11 @@ gameWidget game nm = $(widgetFile "game")
        knowledge :: [Knowledge]
        knowledge = map snd hand
 
-       colorKnowledge :: [Fact Color]
-       colorKnowledge = map knownColor knowledge
+       showColor :: Color -> HtmlUrl (Route App)
+       showColor c = [hamlet|#{show c}|]
 
-       rankKnowledge :: [Fact Rank]
-       rankKnowledge = map knownRank knowledge
+       showRank :: Rank -> HtmlUrl (Route App)
+       showRank r = [hamlet|#{describe r}|]
 
        numText :: Text
        numText = pack $ show $ pnum - 1
@@ -524,14 +543,10 @@ gameWidget game nm = $(widgetFile "game")
                  $else
                    $forall c <- map fst hand
                      <td> <img src=@{StaticR $ cardToRoute c}>
-               <tr id=#{append numText colorRowID}>
-                 <td rowspan="2">Knowledge:
-                 $forall k <- colorKnowledge
-                   <td>#{show k}
-               <tr id=#{append numText rankRowID}>
-                 <td class="hidden"></td>
-                 $forall k <- rankKnowledge
-                   <td>#{show k}
+               <tr id=#{append numText colorRowID} class="knowledgerow">
+                 ^{knowledgeRow showColor $ map knownColor knowledge}
+               <tr id=#{append numText rankRowID} class="knowledgerow">
+                 ^{knowledgeRow showRank $ map knownRank knowledge}
        |]
 
 getPlayHanabiR :: Handler RepHtml

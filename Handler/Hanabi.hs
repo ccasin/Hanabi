@@ -47,6 +47,8 @@ import Network.Wai.EventSource
 ---- - xxx you shouldn't be able to discard when you already have max hints
 ---- - xxx log errors
 ---- - xxx log actions
+---- - xxx you shouldn't be able to give a hint to yourself
+---- - xxx hint chooser is horrible
 
 
 keyToInt :: GameId -> Int
@@ -497,6 +499,11 @@ gameWidget game nm = $(widgetFile "game")
   where
     players :: [(Int,Player)]
     players = zip [1..] $ gamePlayers game
+            
+    allRanks :: [Rank]
+    allRanks = allHints
+    allColors :: [Color]
+    allColors = allHints -- XXX remove once no longer ambiguous
 
     mynum :: Int
     mynum = 
@@ -760,7 +767,7 @@ postDiscardR =
 
         color :: Color
         color = cardColor oldcard
-                
+    
         newDiscardTable :: Text
         newDiscardTable = pack . renderHtml $ 
           discardTable color (getDiscards g color) renderParams

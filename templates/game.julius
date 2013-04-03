@@ -1,5 +1,11 @@
 // cards are 1-indexed in the javascript.
 
+var hintPlayer = 0;  // ugghhhhh global state XXX
+
+function fadeInWithClass (elem) {
+  elem.fadeIn('slow',function () {elem.removeClass("hidden");});
+}
+
 function removeCardAddCard (player,col,cardPath) {
   var cardRow = $("#"+player+#{toJSON cardRowID});
   var card = cardRow.children("td:nth-child("+col+")");
@@ -18,17 +24,17 @@ function removeCardAddCard (player,col,cardPath) {
   card.fadeOut('slow',function () {
     card.remove();
     cardRow.append(newcardtd);
-    newcardtd.fadeIn('slow',function () {newcardtd.removeClass("hidden");});
+    fadeInWithClass(newcardtd);
   });
   color.fadeOut('slow',function () {
     color.remove();
     colorRow.append(newcolortd);
-    newcolortd.fadeIn('slow',function () {newcolortd.removeClass("hidden");});
+    fadeInWithClass(newcolortd);
   });
   rank.fadeOut('slow',function () {
     rank.remove();
     rankRow.append(newranktd);
-    newranktd.fadeIn('slow',function (){newranktd.removeClass("hidden");});
+    fadeInWithClass(newranktd);
   });
 }
 
@@ -55,7 +61,7 @@ function displayMessage (msg) {
   return; // XXX
 }
 
-function sendEvent (dest,n) {
+function sendPlayDiscard (dest,n) {
   for (var i=1; i <= #{toJSON numCards}; i++) {
     getCard(#{toJSON mynum},i)
       .removeAttr("onclick")
@@ -67,10 +73,18 @@ function sendEvent (dest,n) {
          });
 }
 
+function sendHint (dest) {
+  $.post(dest,{#{toJSON playerField}:hintPlayer},
+         function (data,s,j) {
+           handleEvents (data);
+         });
+}
+
+
 function makeDiscards () {
   for (var i=1; i <= #{toJSON numCards}; i++) {
     getCard(#{toJSON mynum},i)
-      .attr("onclick","sendEvent (\"@{DiscardR}\","+i+")")
+      .attr("onclick","sendPlayDiscard (\"@{DiscardR}\","+i+")")
       .addClass("clickable");
   }
 }
@@ -78,10 +92,29 @@ function makeDiscards () {
 function makePlays () {
   for (var i=1; i <= #{toJSON numCards}; i++) {
     getCard(#{toJSON mynum},i)
-      .attr("onclick","sendEvent (\"@{PlayR}\","+i+")")
+      .attr("onclick","sendPlayDiscard (\"@{PlayR}\","+i+")")
       .addClass("clickable");
   }
 }
+
+function makeHintPeople () {
+  var row = $("#playerHintButtonRow");
+  fadeInWithClass(row);
+}
+
+function makeColorHint(b) {
+  var color = b.attr("data-cardcolor");
+  b.attr("onclick","sendEvent('colorhint/"+hintPlayer+"/"+color"'")
+}
+
+function makeHintTypes(i) {
+  hintPlayer = i;
+  $("button.colorHintButton").
+  fadeInWithClass($("#typeHintTextRow"));
+  fadeInWithClass($("#colorHintButtonRow"));
+  fadeInWithClass($("#rankHintButtonRow"));
+}
+
 
 function handleEvents (events) {
   console.debug(events);

@@ -29,13 +29,36 @@
           <td class="discardspace">
 
 <div id="actions" class="curvy">
-  <div class="topAction" id="playAction">
-    <button type="button" class="actionButton" onclick="makePlays ()">Play
-  <div class="topAction" id="discardAction">
-    <button type="button" class="actionButton" onclick="makeDiscards ()">Discard
-  <div class="topAction" id="hintAction">
-    <button type="button" class="actionButton">Hint
-          
+  <table>
+    <tr>
+      <td class="topactionbutton" colspan="2">
+        <button type="button" class="actionButton" onclick="makePlays ()">Play
+      <td class="topactionbutton" colspan="2">
+        <button type="button" class="actionButton" onclick="makeDiscards ()">Discard
+      <td class="topactionbutton">
+        <button type="button" class="actionButton" onclick="makeHintPeople ()">Hint
+    <tr class="hidden" id="playerHintTextRow">
+      <td colspan="5">
+        Who would you like to give a hint?
+    <tr class="hidden" id="playerHintButtonRow">
+      $forall (i,p) <- players
+        <td class="playerHintButton">
+          <button type="button" class="playerHintButton" onclick="makeHintTypes(#{i})">
+            #{playerName p}
+    <tr class="hidden" id="typeHintTextRow">
+      <td colspan="5">
+        Which kind of cards would you like to tell them about?
+    <tr class="hidden" id="colorHintButtonRow">
+      $forall c <- allColors
+        <td class="colorHintButton">
+          <button type="button" class="colorHintButton" data-cardcolor="#{show c}">
+            #{show c}
+    <tr class="hidden" id="rankHintButtonRow">
+      $forall r <- allRanks
+        <td class="rankHintButton">
+          <button type="button" class="rankHintButton" data-cardrank="#{show r}">
+            #{describe r}
+    
 
 <div id="chat" class="curvy">
 

@@ -23,5 +23,5 @@
 
 /discard DiscardR POST
 /play PlayR POST
-/colorhint/#Int/#Color ColorHintR POST
-/rankhint/#Int/#Rank RankHintR POST
+/colorhint ColorHintR POST
+/rankhint RankHintR POST

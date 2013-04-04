@@ -42,6 +42,10 @@ instance Hintable Color where
   describe Yellow = "yellow (square)"
   describe Pink   = "pink (star)"
 
+instance PathPiece Color where
+  toPathPiece = pack . show
+  fromPathPiece = readMay . unpack
+
 data Rank  = One | Two | Three | Four | Five
     deriving (Show,Read,Eq,Enum,Bounded,Ord)
 derivePersistField "Rank"
@@ -55,6 +59,10 @@ instance Hintable Rank where
   describe Three = "3"
   describe Four = "4"
   describe Five = "5"
+
+instance PathPiece Rank where
+  toPathPiece = pack . show
+  fromPathPiece = readMay . unpack
 
 rankScore :: Rank -> Int
 rankScore One   = 1

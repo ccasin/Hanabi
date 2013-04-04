@@ -1,7 +1,5 @@
 // cards are 1-indexed in the javascript.
 
-var hintPlayer = 0;  // ugghhhhh global state XXX
-
 function fadeInWithClass (elem) {
   elem.fadeIn('slow',function () {elem.removeClass("hidden");});
 }
@@ -73,14 +71,6 @@ function sendPlayDiscard (dest,n) {
          });
 }
 
-function sendHint (dest) {
-  $.post(dest,{#{toJSON playerField}:hintPlayer},
-         function (data,s,j) {
-           handleEvents (data);
-         });
-}
-
-
 function makeDiscards () {
   for (var i=1; i <= #{toJSON numCards}; i++) {
     getCard(#{toJSON mynum},i)
@@ -97,24 +87,43 @@ function makePlays () {
   }
 }
 
-function makeHintPeople () {
-  var row = $("#playerHintButtonRow");
-  fadeInWithClass(row);
+// These three functions make the individual hint buttons appear and work.
+function makeColorHint(i,b) {
+  var color = b.attr("data-cardcolor");
+  var data = {#{toJSON playerField}:i
+             ,#{toJSON colorField}:color};
+  b.attr("onclick","sendHint(\"@{ColorHintR}\","+data+")");  
 }
 
-function makeColorHint(b) {
-  var color = b.attr("data-cardcolor");
-  b.attr("onclick","sendEvent('colorhint/"+hintPlayer+"/"+color"'")
+function makeRankHint(i,b) {
+  var rank = b.attr("data-cardrank");
+  var data = {#{toJSON playerField}:i
+             ,#{toJSON rankField}:rank};
+  b.attr("onclick","sendHint(\"@{RankHintR}\","+data+")");  
 }
 
 function makeHintTypes(i) {
-  hintPlayer = i;
-  $("button.colorHintButton").
+  $(".colorHintButton").each(function() {makeColorHint(i,$(this))});
+  $(".rankHintButton").each(function() {makeRankHint(i,$(this))});
   fadeInWithClass($("#typeHintTextRow"));
   fadeInWithClass($("#colorHintButtonRow"));
   fadeInWithClass($("#rankHintButtonRow"));
 }
 
+// This sends a hint to the server
+function sendHint (dest,data) {
+  $.post(dest,{#{toJSON playerField}:hintPlayer},
+         function (data,s,j) {
+           handleEvents (data);
+         });
+}
+
+
+
+// makes the player names appear and work
+function makeHintPeople () {
+  $(".hintPlayerInfo").each(function() {fadeInWithClass($(this))});
+}
 
 function handleEvents (events) {
   console.debug(events);

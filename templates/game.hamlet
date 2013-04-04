@@ -37,11 +37,11 @@
         <button type="button" class="actionButton" onclick="makeDiscards ()">Discard
       <td class="topactionbutton">
         <button type="button" class="actionButton" onclick="makeHintPeople ()">Hint
-    <tr class="hidden" id="playerHintTextRow">
+    <tr class="hidden hintPlayerInfo" id="playerHintTextRow">
       <td colspan="5">
         Who would you like to give a hint?
-    <tr class="hidden" id="playerHintButtonRow">
-      $forall (i,p) <- players
+    <tr class="hidden hintPlayerInfo" id="playerHintButtonRow">
+      $forall (i,p) <- otherPlayers
         <td class="playerHintButton">
           <button type="button" class="playerHintButton" onclick="makeHintTypes(#{i})">
             #{playerName p}

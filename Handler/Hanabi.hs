@@ -4,7 +4,7 @@
   ,getGameEventReceiveR,getLobbyEventReceiveR,getPlayerEventReceiveR
   ,getSetNameR,postSetNameR
   ,getDumpTablesR  -- XXX
-  ,postDiscardR,postPlayR)
+  ,postColorHintR,postRankHintR,postDiscardR,postPlayR)
    
 
 where
@@ -66,13 +66,16 @@ toJSONT = toJSON
 -- object fields
 
 cardField, messagesField, errorField, newcardField, playerField :: Text
-discardField, playField :: Text
+discardField, playField, colorField, rankField :: Text
 replacecontentField, replaceidField, replacedataField  :: Text
 cardField        = "card"           -- Int
 playerField      = "player"    -- Int
 
 discardField     = "discard"        -- object (cardField,playerField,newcardfield (opt))
 playField        = "play"           -- object (cardField,playerField,newcardfield (opt))
+
+colorField       = "color"
+rankField        = "rank"
 
 messagesField    = "msgs"            -- [String]
 errorField       = "error"          -- String
@@ -83,6 +86,8 @@ replacecontentField = "replacecontent" -- object (replaceid,replacedata)
                                        -- an id, and the content
 replaceidField = "replaceid"
 replacedataField = "replacedata"
+
+
 
 -- css ids
 cardRowID, colorRowID, rankRowID :: Text
@@ -497,8 +502,9 @@ knowledgeRow disp ks = [hamlet|
 gameWidget :: Game -> Text -> Widget
 gameWidget game nm = $(widgetFile "game")
   where
-    players :: [(Int,Player)]
-    players = zip [1..] $ gamePlayers game
+    players,otherPlayers :: [(Int,Player)]
+    players      = zip [1..] $ gamePlayers game
+    otherPlayers = filter (\(_,p) -> nm /= playerName p) players
             
     allRanks :: [Rank]
     allRanks = allHints
@@ -543,7 +549,6 @@ gameWidget game nm = $(widgetFile "game")
                <b> #{pnum}. #{name}
              <table id=#{append numText "cards"}>
                <tr id=#{append numText cardRowID}>
-                 <td></td>
                  $if nm == name
                    $forall k <- knowledge
                      <td> <img src=@{StaticR $ knowledgeToRoute k}>
@@ -694,7 +699,16 @@ getLobbyEventReceiveR = do
 ---------------------------------------
 ----- Game event handlers (AJAX) ------
 
-postActionHandler :: FormInput App App a 
+postColorHintR :: Handler ()
+postColorHintR = do
+  $(logDebug) "FOOOOO"
+
+
+postRankHintR :: Handler ()
+postRankHintR = undefined
+
+-- XXX these can be better cleaned up and combined
+postActionHandler :: Show a => FormInput App App a  -- XXX show
                   -> (a -> Game -> Either String (Game,b))
                   -> (Game -> Int -> b -> Handler (Maybe Text -> [(Text,Value)]))
                              -- int is current player
@@ -703,6 +717,7 @@ postActionHandler inputform attemptaction handleresult = do
   nm <- requireName
   -- remember that any number sent back to javascript will need a +1
   content <- runInputPost inputform
+  $(logDebug) $ pack $ show content
   (g,result) <- requireGameTransaction (\gid game ->
     case gameStatus game of
       NotStarted  -> return $ (game,Left "The game isn't running.")

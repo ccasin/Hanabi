@@ -13,7 +13,7 @@ import Import
 
 import Data.Maybe (isJust,fromMaybe)
 import Data.IORef
-import Data.Text (pack,append,strip)
+import Data.Text (pack,unpack,append,strip)
 import qualified Data.Text as T (concat,length)
 
 import Data.Aeson hiding (object)
@@ -32,10 +32,10 @@ import Data.List (foldl',find,(\\))
 import Yesod.Auth
 import Network.Wai.EventSource
 
+import Safe (readMay)
+
 ----  
 ---- TODO
-----
----- - game implementation...
 ----
 ---- - xxx can't change name while playing
 ---- - xxx dummy auth doesn't handle non-unique names right, and doens't restrict name length.
@@ -45,10 +45,15 @@ import Network.Wai.EventSource
 ---- - xxx figure out when to delete channels
 ---- - xxx it would be "easy" for one player to listen to another player's events
 ---- - xxx you shouldn't be able to discard when you already have max hints
+---- - xxx highlight current player
+---- - xxx grey out non-selected player's actions
+---- - xxx organize players better on screen
 ---- - xxx log errors
 ---- - xxx log actions
 ---- - xxx you shouldn't be able to give a hint to yourself
+---- - xxx end game doesn't happen
 ---- - xxx hint chooser is horrible
+---- - xxx highlight selected hints in red
 
 
 keyToInt :: GameId -> Int
@@ -95,7 +100,36 @@ cardRowID  = "CardRow"
 colorRowID = "ColorRow"
 rankRowID  = "RankRow"
 
+colorHintID,rankHintID :: Int -> Text
+colorHintID i = append (pack $ show i) colorRowID
+rankHintID  i = append (pack $ show i) rankRowID
 
+---------------------------------------
+------- How to display knowledge ------
+
+htmlColor :: Color -> HtmlUrl (Route App)
+htmlColor c = [hamlet|#{show c}|]
+
+htmlRank :: Rank -> HtmlUrl (Route App)
+htmlRank r = [hamlet|#{describe r}|]
+
+dispKnowledge :: Hintable a => (a -> HtmlUrl (Route App)) 
+                            -> Fact a -> HtmlUrl (Route App)
+dispKnowledge d (Is a)    = d a
+dispKnowledge _ Mystery   = [hamlet| |]
+dispKnowledge d (Isnt nots) =
+  if length nots > 2 then list (allHints \\ nots)
+                     else [hamlet|not ^{list nots}|]
+  where
+    list []     = [hamlet| |]
+    list [a]    = d a
+    list (a:as) = [hamlet| ^{d a} or ^{list as} \|]
+
+dispColorKnowledge :: Fact Color -> HtmlUrl (Route App)
+dispColorKnowledge = dispKnowledge htmlColor
+
+dispRankKnowledge :: Fact Rank -> HtmlUrl (Route App)
+dispRankKnowledge = dispKnowledge htmlRank
 
 -----------------------------
 ------ The channel map ------
@@ -181,6 +215,18 @@ nameForm :: Form Text
 nameForm = renderDivs $ areq textField "" {fsAttrs = [("maxLength","20")]} Nothing
 --------------------------
 --------------------------
+
+----------------------------------------------------------
+---- Small bits of HTML for various parts of the page ----
+
+hintsTdContent :: Int -> Text
+hintsTdContent h = append "<b>Hints:</b> " (pack $ show h)
+
+deckTdContent :: Int -> Text
+deckTdContent d = append "<b>Deck:</b> " (pack $ show d)
+
+strikesTdContent :: Int -> Text
+strikesTdContent i = append "<b>Strikes:</b> " (pack $ show i)
 
 --------------------------
 ----- EVENTS -------------
@@ -480,24 +526,12 @@ discardTable color discards =
              <td>
   |]
 
-knowledgeRow :: Hintable a => (a -> HtmlUrl (Route App)) -> [Fact a] -> HtmlUrl (Route App)
+knowledgeRow :: Hintable a => (Fact a -> HtmlUrl (Route App)) -> [Fact a] -> HtmlUrl (Route App)
 knowledgeRow disp ks = [hamlet|
     $forall f <- ks
       <td class="knowledgecell">
-        ^{dispKnowledge disp f}
+        ^{disp f}
   |]
-  where
-    dispKnowledge :: Hintable a => (a -> HtmlUrl (Route App)) 
-                                -> Fact a -> HtmlUrl (Route App)
-    dispKnowledge d (Is a)    = d a
-    dispKnowledge _ Mystery   = [hamlet| |]
-    dispKnowledge d (Isnt nots) =
-      if length nots > 2 then list (allHints \\ nots)
-                         else [hamlet|not ^{list nots}|]
-      where
-        list []     = [hamlet| |]
-        list [a]    = d a
-        list (a:as) = [hamlet| ^{d a} or ^{list as} \|]
 
 gameWidget :: Game -> Text -> Widget
 gameWidget game nm = $(widgetFile "game")
@@ -534,12 +568,6 @@ gameWidget game nm = $(widgetFile "game")
        knowledge :: [Knowledge]
        knowledge = map snd hand
 
-       showColor :: Color -> HtmlUrl (Route App)
-       showColor c = [hamlet|#{show c}|]
-
-       showRank :: Rank -> HtmlUrl (Route App)
-       showRank r = [hamlet|#{describe r}|]
-
        numText :: Text
        numText = pack $ show $ pnum - 1
      in
@@ -555,10 +583,10 @@ gameWidget game nm = $(widgetFile "game")
                  $else
                    $forall c <- map fst hand
                      <td> <img src=@{StaticR $ cardToRoute c}>
-               <tr id=#{append numText colorRowID} class="knowledgerow">
-                 ^{knowledgeRow showColor $ map knownColor knowledge}
-               <tr id=#{append numText rankRowID} class="knowledgerow">
-                 ^{knowledgeRow showRank $ map knownRank knowledge}
+               <tr id=#{colorHintID (pnum - 1)} class="knowledgerow">
+                 ^{knowledgeRow dispColorKnowledge $ map knownColor knowledge}
+               <tr id=#{rankHintID (pnum - 1)} class="knowledgerow">
+                 ^{knowledgeRow dispRankKnowledge $ map knownRank knowledge}
        |]
 
 getPlayHanabiR :: Handler RepHtml
@@ -699,10 +727,77 @@ getLobbyEventReceiveR = do
 ---------------------------------------
 ----- Game event handlers (AJAX) ------
 
-postColorHintR :: Handler ()
-postColorHintR = do
-  $(logDebug) "FOOOOO"
+hintHandler :: Int -> Either Color Rank -> Handler RepJson
+hintHandler i e = do
+  nm         <- requireName
+--  routeRenderer <- getUrlRender
+  renderParams  <- getUrlRenderParams
+  (g,result) <- requireGameTransaction (\gid game ->
+    case gameStatus game of
+      NotStarted  -> return $ (game,Left "The game isn't running.")
+      Done        -> return $ (game,Left "The game has already ended.")
+      Running {currentP} ->
+        let currentPName = playerName $ gamePlayers game !! currentP
+            correctPlayer = nm == currentPName in
+        if not correctPlayer 
+          then return $ (game,Left "You aren't the current player.")
+          else case hint game i e of
+            Left err               -> return (game,Left err)
+            Right (game',hplayer,highlightedCards) -> 
+              do replace gid game'
+                 return (game',Right (currentP,hplayer,highlightedCards)))
+  case result of
+    Left err            -> jsonToRepJson $ object [(errorField,err)]
+    Right (currentPN,hintedP,hintedCards) -> do 
+       iochans <- liftM gameChannels getYesod
+       chans <- liftIO $ readIORef iochans
+       return undefined -- XXXx
+         -- Things to return:
+         -- highlighted cards, updated knowledge, updated hints
+--  let 
+--  mapM_ (maybe (return ()) (flip sendMessage $ object (messages $ Just nm))) playerChans
+--  jsonToRepJson $ object $ messages Nothing
+      where
+        hintIdField :: Int -> Text
+        hintIdField = case e of Left _ -> colorHintID
+                                Right _ -> rankHintID
+        
+        htmlFact :: Knowledge -> HtmlUrl (Route App)
+        htmlFact = case e of
+          Left _ -> dispColorKnowledge . knownColor
+          Right _ -> dispRankKnowledge . knownRank
 
+        dispFact :: Knowledge -> Text
+        dispFact k = pack $ renderHtml $ htmlFact k renderParams
+        
+        knowlUpdates :: [[(Text,Value)]]
+        knowlUpdates =
+          map (\(cnum,(_,k)) -> [(replaceidField, toJSONT $ hintIdField cnum),
+                                 (replacedataField, toJSONT $ dispFact k)])
+              (zip [0..] $ playerHand hintedP)
+
+        contentUpdates :: (Text,Value)
+        contentUpdates = (replacecontentField, toJSON $ map object $
+           undefined : knowlUpdates)
+
+        otherPlayers :: [Text]
+        otherPlayers = map playerChanId $
+          filter (\p -> (playerName p /= nm) && (playerName p /= playerName hintedP))
+                 (gamePlayers g)
+--      playerChans = map (flip lookup chans) otherPlayers -- XXX log if any nothings?
+
+postColorHintR :: Handler RepJson
+postColorHintR = do
+  (p,ctext) <- runInputPost iform
+  case readMay $ unpack ctext of
+    Just c  -> hintHandler (pred p) $ Left c
+    Nothing -> 
+      jsonToRepJson $ object $ [(errorField,
+        toJSONT "Invalid hint input.  Please try refreshing your page")] -- XXX
+  where
+    iform :: FormInput App App (Int,Text)
+    iform = (,) <$> ireq intField playerField
+                <*> ireq textField colorField
 
 postRankHintR :: Handler ()
 postRankHintR = undefined
@@ -717,7 +812,6 @@ postActionHandler inputform attemptaction handleresult = do
   nm <- requireName
   -- remember that any number sent back to javascript will need a +1
   content <- runInputPost inputform
-  $(logDebug) $ pack $ show content
   (g,result) <- requireGameTransaction (\gid game ->
     case gameStatus game of
       NotStarted  -> return $ (game,Left "The game isn't running.")
@@ -791,11 +885,9 @@ postDiscardR =
           [ [(replaceidField,toJSON $ discardTableId (cardColor oldcard))
             ,(replacedataField, toJSON newDiscardTable)]
            ,[(replaceidField,toJSONT "hintstd")
-            ,(replacedataField, toJSONT $ 
-                append "<b>Hints:</b> " (pack $ show $ gameHints g))]
+            ,(replacedataField, toJSONT $ hintsTdContent $ gameHints g)]
            ,[(replaceidField,toJSONT "decksizetd")
-            ,(replacedataField, toJSONT $ 
-                append "<b>Deck:</b> " (pack $ show $ length $ gameDeck g))]
+            ,(replacedataField, toJSONT $ deckTdContent $ length $ gameDeck g)]
           ])
       return (\me ->
         [(discardField,object $
@@ -865,14 +957,14 @@ postPlayR =
                     ,(replacedataField, toJSON newDiscardTable)])
                    
           : [[(replaceidField,toJSONT "hintstd")
-             ,(replacedataField, toJSONT $ 
-                 append "<b>Hints:</b> " (pack $ show $ gameHints g))]
+             ,(replacedataField,
+               toJSONT $ hintsTdContent $ gameHints g)]
             ,[(replaceidField,toJSONT "decksizetd")
-             ,(replacedataField, toJSONT $ 
-                 append "<b>Deck:</b> " (pack $ show $ length $ gameDeck g))]
+             ,(replacedataField,
+               toJSONT $ hintsTdContent $ length $ gameDeck g)]
             ,[(replaceidField,toJSONT "strikestd")
-             ,(replacedataField, toJSONT $ 
-                 append "<b>Strikes:</b> " (pack $ show $ gameStrikes g))]
+             ,(replacedataField,
+               toJSONT $ strikesTdContent $ gameStrikes g)]
               ])
 
       return (\me ->

@@ -46,6 +46,9 @@ instance PathPiece Color where
   toPathPiece = pack . show
   fromPathPiece = readMay . unpack
 
+prettyColor :: Color -> HtmlUrl a
+prettyColor a = [hamlet| foo |]
+
 data Rank  = One | Two | Three | Four | Five
     deriving (Show,Read,Eq,Enum,Bounded,Ord)
 derivePersistField "Rank"
@@ -294,11 +297,15 @@ play gm cnum =
         color = cardColor card
         rank  = cardRank card
 
--- Takes in the player the hint is being given to and what the hint is
--- Returns the updated game and a list of each card about which there is
---   new, positive info (to update the display)
+-- Takes in the player the hint is being given to and what the hint is.
+--
+-- Returns 
+--   1) the updated game
+--   2) the hinted player (convenient so I don't have to find him again later)
+--   3) a list indicating which of the player's cards have been singled out
+--      by this hint (convenient for updating the view)
 hint :: MonadError String m => Game -> Int -> Either Color Rank
-     -> m (Game,[Int])
+     -> m (Game,Player,[Bool])
 hint gm hp hintinfo = 
   case (gameStatus gm, hints > 0) of
     (gs@Running {currentP = cp},True) ->
@@ -307,28 +314,28 @@ hint gm hp hintinfo =
           return (gm {gameStatus=gs {currentP=nextPlayer gm cp}
                      ,gameHints = hints - 1
                      ,gamePlayers=players},
+                  players !! hp,
                   upCards)
     (_,False) -> throwError "hint: no hints left"
     (_,_) -> throwError "hint: called during non-running game"
   where
     hints = gameHints gm
 
-    updateP :: Player -> ([Int],Player)
-    updateP p =
-        let (hand,newknown) = updateHand $ playerHand p
-        in (newknown,p {playerHand=hand})
-
-    updateHand :: [(Card,Knowledge)] -> ([(Card,Knowledge)],[Int])
-    updateHand hand = updateHandCount 0 hand
+    updateP :: Player -> ([Bool],Player)
+    updateP p = (map snd newKnowledge, p {playerHand=newHand})
       where
-        updateHandCount :: Int -> [(Card,Knowledge)] -> ([(Card,Knowledge)],[Int])
-        updateHandCount _ []        = ([],[])
-        updateHandCount n ((c,k):h) =
-          let
-            (h',updates) = updateHandCount (n+1) h
-            (k',elementknown)  = updateCard c k
-          in ((c,k'):h', if elementknown then n:updates else updates)
+        oldHand,newHand :: [(Card,Knowledge)]
+        newKnowledge    :: [(Knowledge,Bool)]
+        oldHand      = playerHand p
+        newKnowledge = updateHand oldHand
+        newHand      = zipWith (\(c,_) (k,_) -> (c,k)) oldHand newKnowledge
 
+    -- bool indicates whether the card was singled out by the hint
+    updateHand :: [(Card,Knowledge)] -> [(Knowledge,Bool)]
+    updateHand = map $ uncurry updateCard
+
+    -- Given a card and what we used to know about it, return the updated
+    -- knowledge and whether this card was pointed out in the hint.
     updateCard :: Card -> Knowledge -> (Knowledge,Bool)
     updateCard card k =
       case hintinfo of
@@ -338,15 +345,17 @@ hint gm hp hintinfo =
                      (k {knownRank=f},b)
       where
         updateK :: Hintable a => a -> a -> Fact a -> (Fact a,Bool)
-        updateK _     _     (Is a)    = (Is a,False)
-        updateK carda hinta Mystery   =
-          if carda == hinta then (Is carda,True) else (Isnt [hinta],False)
-        updateK carda hinta (Isnt as) =
-            case (carda == hinta, hinta `elem` as, allHints \\ (hinta:as)) of
-              (True ,_    ,_   ) -> (Is carda,True)
-              (False,True ,_   ) -> (Isnt as,False)
-              (False,False,[a']) -> (Is a', True)
-              (False,False,_   ) -> (Isnt (hinta:as),False)
+        updateK carda hinta knowl =
+          (if carda == hinta
+             then Is carda
+             else case knowl of 
+               Is a    -> Is a
+               Mystery -> Isnt [hinta]
+               Isnt as -> case (allHints \\ (hinta:as), hinta `elem` as) of
+                            ([a'],_)  -> Is a'
+                            (_,True)  -> Isnt as
+                            (_,False) -> Isnt (hinta:as)
+          ,carda == hinta)
 
 prettyNameList :: Game -> Text
 prettyNameList g = intercalate ", " $ map playerName $ gamePlayers g

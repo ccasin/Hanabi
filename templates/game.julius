@@ -15,8 +15,8 @@ function removeCardAddCard (player,col,cardPath) {
   var rank = rankRow.children("td:nth-child("+col+")");
 
   var newcardtd = $('<td>').addClass("hidden").append($('<img>').attr("src",cardPath));
-  var newcolortd = $('<td>').addClass("hidden").html("Mystery");
-  var newranktd = $('<td>').addClass("hidden").html("Mystery");
+  var newcolortd = $('<td>').addClass("hidden");
+  var newranktd = $('<td>').addClass("hidden");
 
 
   card.fadeOut('slow',function () {
@@ -88,18 +88,22 @@ function makePlays () {
 }
 
 // These three functions make the individual hint buttons appear and work.
+function sendColorHint(i,c) {
+  $.post("@{ColorHintR}",{#{toJSON playerField}:i,
+                          #{toJSON colorField}:c},
+         function (data,s,j) {handleEvents(data)})
+}
+
 function makeColorHint(i,b) {
   var color = b.attr("data-cardcolor");
-  var data = {#{toJSON playerField}:i
-             ,#{toJSON colorField}:color};
-  b.attr("onclick","sendHint(\"@{ColorHintR}\","+data+")");  
+  b.attr("onclick","sendColorHint("+i+",\""+color+"\")");  
 }
 
 function makeRankHint(i,b) {
   var rank = b.attr("data-cardrank");
   var data = {#{toJSON playerField}:i
              ,#{toJSON rankField}:rank};
-  b.attr("onclick","sendHint(\"@{RankHintR}\","+data+")");  
+  b.attr("onclick","sendHint2(\"@{RankHintR}\","+data+")");  
 }
 
 function makeHintTypes(i) {
@@ -111,8 +115,8 @@ function makeHintTypes(i) {
 }
 
 // This sends a hint to the server
-function sendHint (dest,data) {
-  $.post(dest,{#{toJSON playerField}:hintPlayer},
+function sendHint2 (dest,data) {
+  $.post(dest,data,
          function (data,s,j) {
            handleEvents (data);
          });
@@ -158,8 +162,6 @@ function handleEvents (events) {
       $("#"+rc[i].replaceid).html(rc[i].replacedata);
     }
   }
-
-    
 }
 
 var src = new EventSource("@{PlayerEventReceiveR mychan}");
@@ -167,6 +169,4 @@ src.onmessage = function(msg) {
   var event = JSON.parse(msg.data);
   handleEvents(event);
 }
-
-
 

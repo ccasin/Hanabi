@@ -1,4 +1,4 @@
-module Model where
+  module Model where
 
 import Prelude
 import Yesod
@@ -309,7 +309,8 @@ hint :: MonadError String m => Game -> Int -> Either Color Rank
 hint gm hp hintinfo = 
   case (gameStatus gm, hints > 0) of
     (gs@Running {currentP = cp},True) ->
-       do (upCards,players) <-
+       do when (cp == hp) $ throwError "hint: you can't give yourself a hint"
+          (upCards,players) <-
               updatePlayer (gamePlayers gm) hp (return . updateP)
           return (gm {gameStatus=gs {currentP=nextPlayer gm cp}
                      ,gameHints = hints - 1

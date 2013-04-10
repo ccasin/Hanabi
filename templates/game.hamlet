@@ -11,11 +11,11 @@
           <td class="boardspace">
     <tr>
       <td colspan="2" id="hintstd">
-        #{hintsTdContent (gameHints game)}
+        ^{hintsTdContent (gameHints game)}
       <td colspan="2" id="strikestd">
-        #{strikesTdContent (gameStrikes game)}
+        ^{strikesTdContent (gameStrikes game)}
       <td id="decksizetd">
-        #{deckTdContent (length (gameDeck game))}
+        ^{deckTdContent (length (gameDeck game))}
 
 <div id="discards" class="curvy">
   <p.nobottommargin>

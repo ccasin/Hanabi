@@ -50,10 +50,10 @@ import Safe (readMay)
 ---- - xxx organize players better on screen
 ---- - xxx log errors
 ---- - xxx log actions
----- - xxx you shouldn't be able to give a hint to yourself
 ---- - xxx end game doesn't happen
 ---- - xxx hint chooser is horrible
 ---- - xxx highlight selected hints in red
+---- - xxx some kind of nicer thing for when cards get updated as a result of hints
 
 
 keyToInt :: GameId -> Int
@@ -73,6 +73,7 @@ toJSONT = toJSON
 cardField, messagesField, errorField, newcardField, playerField :: Text
 discardField, playField, colorField, rankField :: Text
 replacecontentField, replaceidField, replacedataField  :: Text
+replaceCardsField, cardsField :: Text
 cardField        = "card"           -- Int
 playerField      = "player"    -- Int
 
@@ -91,6 +92,9 @@ replacecontentField = "replacecontent" -- object (replaceid,replacedata)
                                        -- an id, and the content
 replaceidField = "replaceid"
 replacedataField = "replacedata"
+
+replaceCardsField = "replacecards"     -- object (playerField,cardsField)
+cardsField        = "cards"            -- [html]
 
 
 
@@ -219,14 +223,14 @@ nameForm = renderDivs $ areq textField "" {fsAttrs = [("maxLength","20")]} Nothi
 ----------------------------------------------------------
 ---- Small bits of HTML for various parts of the page ----
 
-hintsTdContent :: Int -> Text
-hintsTdContent h = append "<b>Hints:</b> " (pack $ show h)
+hintsTdContent :: Int -> HtmlUrl a
+hintsTdContent h = [hamlet|<b>Hints:</b> #{h}|]
 
-deckTdContent :: Int -> Text
-deckTdContent d = append "<b>Deck:</b> " (pack $ show d)
+deckTdContent :: Int -> HtmlUrl a
+deckTdContent d = [hamlet|<b>Deck:</b> #{d}|]
 
-strikesTdContent :: Int -> Text
-strikesTdContent i = append "<b>Strikes:</b> " (pack $ show i)
+strikesTdContent :: Int -> HtmlUrl a
+strikesTdContent i = [hamlet|<b>Strikes:</b> #{i}|]
 
 --------------------------
 ----- EVENTS -------------
@@ -533,6 +537,13 @@ knowledgeRow disp ks = [hamlet|
         ^{disp f}
   |]
 
+-- Constructs the TD showing a player's own card
+playerSecretCardTd :: Knowledge -> HtmlUrl (Route App)
+playerSecretCardTd k = [hamlet|
+    <td>
+      <img src=@{StaticR $ knowledgeToRoute k}>
+  |]
+
 gameWidget :: Game -> Text -> Widget
 gameWidget game nm = $(widgetFile "game")
   where
@@ -579,7 +590,7 @@ gameWidget game nm = $(widgetFile "game")
                <tr id=#{append numText cardRowID}>
                  $if nm == name
                    $forall k <- knowledge
-                     <td> <img src=@{StaticR $ knowledgeToRoute k}>
+                      ^{playerSecretCardTd k}
                  $else
                    $forall c <- map fst hand
                      <td> <img src=@{StaticR $ cardToRoute c}>
@@ -727,11 +738,13 @@ getLobbyEventReceiveR = do
 ---------------------------------------
 ----- Game event handlers (AJAX) ------
 
+-- XXX check for game end
 hintHandler :: Int -> Either Color Rank -> Handler RepJson
-hintHandler i e = do
+hintHandler hintedPN e = do
   nm         <- requireName
 --  routeRenderer <- getUrlRender
   renderParams  <- getUrlRenderParams
+  let render h = pack $ renderHtml $ h renderParams
   (g,result) <- requireGameTransaction (\gid game ->
     case gameStatus game of
       NotStarted  -> return $ (game,Left "The game isn't running.")
@@ -741,17 +754,26 @@ hintHandler i e = do
             correctPlayer = nm == currentPName in
         if not correctPlayer 
           then return $ (game,Left "You aren't the current player.")
-          else case hint game i e of
+          else case hint game hintedPN e of
             Left err               -> return (game,Left err)
             Right (game',hplayer,highlightedCards) -> 
               do replace gid game'
-                 return (game',Right (currentP,hplayer,highlightedCards)))
+                 return (game',Right (hplayer,highlightedCards)))
   case result of
     Left err            -> jsonToRepJson $ object [(errorField,err)]
-    Right (currentPN,hintedP,hintedCards) -> do 
+    Right (hintedP,hintedCards) -> do 
        iochans <- liftM gameChannels getYesod
        chans <- liftIO $ readIORef iochans
-       return undefined -- XXXx
+       let
+         otherPlayerChans = map (flip lookup chans) otherPlayers -- XXX log if any nothings?
+         hintedPlayerChan = lookup (playerChanId hintedP) chans
+       mapM_ (maybe (return ()) (flip sendMessage $ object (actions messageOther)))
+             otherPlayerChans
+       maybe (return ()) 
+             (flip sendMessage 
+                   (object (hintedPlayerCardUpdates : actions messageHinted)))
+             hintedPlayerChan
+       jsonToRepJson $ object $ actions messageHinter
          -- Things to return:
          -- highlighted cards, updated knowledge, updated hints
 --  let 
@@ -778,13 +800,42 @@ hintHandler i e = do
 
         contentUpdates :: (Text,Value)
         contentUpdates = (replacecontentField, toJSON $ map object $
-           undefined : knowlUpdates)
+             [(replaceidField, toJSONT "hintstd")
+             ,(replacedataField, toJSON $ render $ hintsTdContent $ gameHints g)]
+           : knowlUpdates)
+
+        hintedPlayerCardUpdates :: (Text,Value)
+        hintedPlayerCardUpdates = (replaceCardsField, object $
+           [(playerField, toJSON (succ hintedPN)),
+            (cardsField, toJSON $ 
+               map (\(_,k) -> pack $ renderHtml $
+                       playerSecretCardTd k renderParams)
+                 $ playerHand hintedP)
+            ]) -- XXX
 
         otherPlayers :: [Text]
         otherPlayers = map playerChanId $
           filter (\p -> (playerName p /= nm) && (playerName p /= playerName hintedP))
                  (gamePlayers g)
---      playerChans = map (flip lookup chans) otherPlayers -- XXX log if any nothings?
+
+        hintDesc :: Text
+        hintDesc = case e of
+                     Left c  -> append (describe c) " cards"
+                     Right r -> append (describe r) "s"
+
+        messageHinted,messageHinter,messageOther :: Text
+        messageHinted = T.concat [nm, " gave you a hint about your ",
+                                  hintDesc,"."]
+        messageHinter = T.concat ["You gave ", playerName hintedP,
+                                  " a hint about their ", hintDesc,"."]
+        messageOther = T.concat [nm, " gave ", playerName hintedP,
+                                 " a hint about their ", hintDesc,"."]
+
+        actions :: Text -> [(Text,Value)]
+        actions message = [contentUpdates,(messagesField,toJSON message)]
+        
+
+        
 
 postColorHintR :: Handler RepJson
 postColorHintR = do
@@ -857,6 +908,8 @@ postDiscardR =
       routeRenderer <- getUrlRender
       renderParams  <- getUrlRenderParams
       let
+        render h = pack $ renderHtml $ h renderParams
+
         message :: Maybe Text -> Text
         message me = T.concat $
              [fromMaybe "You" me," discarded a ",describeCard oldcard]
@@ -878,16 +931,15 @@ postDiscardR =
         color = cardColor oldcard
     
         newDiscardTable :: Text
-        newDiscardTable = pack . renderHtml $ 
-          discardTable color (getDiscards g color) renderParams
+        newDiscardTable = render $ discardTable color (getDiscards g color)
 
         replaceContent = (replacecontentField, toJSON $ map object $
           [ [(replaceidField,toJSON $ discardTableId (cardColor oldcard))
             ,(replacedataField, toJSON newDiscardTable)]
            ,[(replaceidField,toJSONT "hintstd")
-            ,(replacedataField, toJSONT $ hintsTdContent $ gameHints g)]
+            ,(replacedataField, toJSON $ render $ hintsTdContent $ gameHints g)]
            ,[(replaceidField,toJSONT "decksizetd")
-            ,(replacedataField, toJSONT $ deckTdContent $ length $ gameDeck g)]
+            ,(replacedataField, toJSONT $ render $ deckTdContent $ length $ gameDeck g)]
           ])
       return (\me ->
         [(discardField,object $
@@ -918,6 +970,9 @@ postPlayR =
       routeRenderer <- getUrlRender
       renderParams  <- getUrlRenderParams
       let
+        render :: HtmlUrl (Route App) -> Text
+        render h = pack $ renderHtml $ h renderParams
+
         message :: Maybe Text -> Text
         message me = T.concat $ (fromMaybe "You" me) :
               if success 
@@ -941,13 +996,12 @@ postPlayR =
         color = cardColor oldcard
                 
         newBoardCell :: Text
-        newBoardCell = pack . renderHtml $ [hamlet|
+        newBoardCell = render [hamlet|
             <img src=@{StaticR (cardToRoute oldcard)}>
-          |] renderParams
+          |]
 
         newDiscardTable :: Text
-        newDiscardTable = pack . renderHtml $ 
-          discardTable color (getDiscards g color) renderParams
+        newDiscardTable = render $ discardTable color (getDiscards g color)
 
         replaceContent = (replacecontentField, toJSON $ map object $
             (if success
@@ -958,13 +1012,13 @@ postPlayR =
                    
           : [[(replaceidField,toJSONT "hintstd")
              ,(replacedataField,
-               toJSONT $ hintsTdContent $ gameHints g)]
+               toJSONT $ render $ hintsTdContent $ gameHints g)]
             ,[(replaceidField,toJSONT "decksizetd")
              ,(replacedataField,
-               toJSONT $ hintsTdContent $ length $ gameDeck g)]
+               toJSONT $ render $ hintsTdContent $ length $ gameDeck g)]
             ,[(replaceidField,toJSONT "strikestd")
              ,(replacedataField,
-               toJSONT $ strikesTdContent $ gameStrikes g)]
+               toJSONT $ render $ strikesTdContent $ gameStrikes g)]
               ])
 
       return (\me ->

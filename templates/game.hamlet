@@ -37,23 +37,23 @@
         <button type="button" class="actionButton" onclick="makeDiscards ()">Discard
       <td class="topactionbutton">
         <button type="button" class="actionButton" onclick="makeHintPeople ()">Hint
-    <tr class="hidden hintPlayerInfo" id="playerHintTextRow">
+    <tr class="hintPlayerInfo" id="playerHintTextRow" style="display:none;">
       <td colspan="5">
         Who would you like to give a hint?
-    <tr class="hidden hintPlayerInfo" id="playerHintButtonRow">
+    <tr class="hintPlayerInfo" id="playerHintButtonRow" style="display:none;">
       $forall (i,p) <- otherPlayers
         <td class="playerHintButton">
           <button type="button" class="playerHintButton" onclick="makeHintTypes(#{i})">
             #{playerName p}
-    <tr class="hidden" id="typeHintTextRow">
+    <tr id="typeHintTextRow" style="display:none;">
       <td colspan="5">
         Which kind of cards would you like to tell them about?
-    <tr class="hidden" id="colorHintButtonRow">
+    <tr id="colorHintButtonRow" style="display:none;">
       $forall c <- allColors
         <td class="colorHintButton">
           <button type="button" class="colorHintButton" data-cardcolor="#{show c}">
             #{show c}
-    <tr class="hidden" id="rankHintButtonRow">
+    <tr id="rankHintButtonRow" style="display:none;">
       $forall r <- allRanks
         <td class="rankHintButton">
           <button type="button" class="rankHintButton" data-cardrank="#{show r}">

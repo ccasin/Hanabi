@@ -1,9 +1,5 @@
 // cards are 1-indexed in the javascript.
 
-function fadeInWithClass (elem) {
-  elem.fadeIn('slow',function () {elem.removeClass("hidden");});
-}
-
 function removeCardAddCard (player,col,cardPath) {
   var cardRow = $("#"+player+#{toJSON cardRowID});
   var card = cardRow.children("td:nth-child("+col+")");
@@ -14,25 +10,25 @@ function removeCardAddCard (player,col,cardPath) {
   var rankRow = $("#"+player+#{toJSON rankRowID});
   var rank = rankRow.children("td:nth-child("+col+")");
 
-  var newcardtd = $('<td>').addClass("hidden").append($('<img>').attr("src",cardPath));
-  var newcolortd = $('<td>').addClass("hidden");
-  var newranktd = $('<td>').addClass("hidden");
+  var newcardtd = $('<td>').attr("style","display:none;").append($('<img>').attr("src",cardPath));
+  var newcolortd = $('<td>').attr("style","display:none;");
+  var newranktd = $('<td>').attr("style","display:none;");
 
 
   card.fadeOut('slow',function () {
     card.remove();
     cardRow.append(newcardtd);
-    fadeInWithClass(newcardtd);
+    newcardtd.fadeIn('slow');
   });
   color.fadeOut('slow',function () {
     color.remove();
     colorRow.append(newcolortd);
-    fadeInWithClass(newcolortd);
+    newcolortd.fadeIn('slow');
   });
   rank.fadeOut('slow',function () {
     rank.remove();
     rankRow.append(newranktd);
-    fadeInWithClass(newranktd);
+    newranktd.fadeIn('slow');
   });
 }
 
@@ -91,7 +87,13 @@ function makePlays () {
 function sendColorHint(i,c) {
   $.post("@{ColorHintR}",{#{toJSON playerField}:i,
                           #{toJSON colorField}:c},
-         function (data,s,j) {handleEvents(data)})
+    function (data,s,j) {
+      $(".hintPlayerInfo").fadeOut('slow');
+      $("#typeHintTextRow").fadeOut('slow');
+      $("#colorHintButtonRow").fadeOut('slow');
+      $("#rankHintButtonRow").fadeOut('slow');
+      handleEvents(data);
+    })
 }
 
 function makeColorHint(i,b) {
@@ -109,9 +111,9 @@ function makeRankHint(i,b) {
 function makeHintTypes(i) {
   $(".colorHintButton").each(function() {makeColorHint(i,$(this))});
   $(".rankHintButton").each(function() {makeRankHint(i,$(this))});
-  fadeInWithClass($("#typeHintTextRow"));
-  fadeInWithClass($("#colorHintButtonRow"));
-  fadeInWithClass($("#rankHintButtonRow"));
+  $("#typeHintTextRow").fadeIn('slow');
+  $("#colorHintButtonRow").fadeIn('slow');
+  $("#rankHintButtonRow").fadeIn('slow');
 }
 
 // This sends a hint to the server
@@ -126,7 +128,7 @@ function sendHint2 (dest,data) {
 
 // makes the player names appear and work
 function makeHintPeople () {
-  $(".hintPlayerInfo").each(function() {fadeInWithClass($(this))});
+  $(".hintPlayerInfo").fadeIn('slow');
 }
 
 function handleEvents (events) {

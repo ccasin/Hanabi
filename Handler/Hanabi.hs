@@ -530,12 +530,15 @@ discardTable color discards =
              <td>
   |]
 
-knowledgeRow :: Hintable a => (Fact a -> HtmlUrl (Route App)) -> [Fact a] -> HtmlUrl (Route App)
-knowledgeRow disp ks = [hamlet|
-    $forall f <- ks
-      <td class="knowledgecell">
+knowledgeRow :: Hintable a => (Int -> Text) -> (Fact a -> HtmlUrl (Route App))
+             -> [Fact a] -> HtmlUrl (Route App)
+knowledgeRow ids disp ks = [hamlet|
+    $forall (n,f) <- numberedKs
+      <td class="knowledgecell" id=#{ids n}>
         ^{disp f}
   |]
+  where
+    numberedKs = zip [1..] ks
 
 -- Constructs the TD showing a player's own card
 playerSecretCardTd :: Knowledge -> HtmlUrl (Route App)
@@ -581,6 +584,10 @@ gameWidget game nm = $(widgetFile "game")
 
        numText :: Text
        numText = pack $ show $ pnum - 1
+
+       colorKIds, rankKIds :: Int -> Text
+       colorKIds n = append (colorHintID (pnum-1)) $ pack $ show n
+       rankKIds n  = append (rankHintID (pnum-1)) $ pack $ show n
      in
        [whamlet|
            <div id=#{append "player" numText} class="curvy">
@@ -595,9 +602,9 @@ gameWidget game nm = $(widgetFile "game")
                    $forall c <- map fst hand
                      <td> <img src=@{StaticR $ cardToRoute c}>
                <tr id=#{colorHintID (pnum - 1)} class="knowledgerow">
-                 ^{knowledgeRow dispColorKnowledge $ map knownColor knowledge}
+                 ^{knowledgeRow colorKIds dispColorKnowledge $ map knownColor knowledge}
                <tr id=#{rankHintID (pnum - 1)} class="knowledgerow">
-                 ^{knowledgeRow dispRankKnowledge $ map knownRank knowledge}
+                 ^{knowledgeRow rankKIds dispRankKnowledge $ map knownRank knowledge}
        |]
 
 getPlayHanabiR :: Handler RepHtml
@@ -781,8 +788,10 @@ hintHandler hintedPN e = do
 --  jsonToRepJson $ object $ messages Nothing
       where
         hintIdField :: Int -> Text
-        hintIdField = case e of Left _ -> colorHintID
-                                Right _ -> rankHintID
+        hintIdField card = 
+          append (case e of
+            Left _ -> colorHintID hintedPN
+            Right _ -> rankHintID hintedPN) $ pack $ show card
         
         htmlFact :: Knowledge -> HtmlUrl (Route App)
         htmlFact = case e of
@@ -796,7 +805,7 @@ hintHandler hintedPN e = do
         knowlUpdates =
           map (\(cnum,(_,k)) -> [(replaceidField, toJSONT $ hintIdField cnum),
                                  (replacedataField, toJSONT $ dispFact k)])
-              (zip [0..] $ playerHand hintedP)
+              (zip [1..] $ playerHand hintedP)
 
         contentUpdates :: (Text,Value)
         contentUpdates = (replacecontentField, toJSON $ map object $

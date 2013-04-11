@@ -46,9 +46,6 @@ instance PathPiece Color where
   toPathPiece = pack . show
   fromPathPiece = readMay . unpack
 
-prettyColor :: Color -> HtmlUrl a
-prettyColor a = [hamlet| foo |]
-
 data Rank  = One | Two | Three | Four | Five
     deriving (Show,Read,Eq,Enum,Bounded,Ord)
 derivePersistField "Rank"

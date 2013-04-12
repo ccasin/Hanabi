@@ -1,4 +1,4 @@
- module Handler.Hanabi 
+module Handler.Hanabi 
   (getHanabiLobbyR,getPlayHanabiR,getStartHanabiR
   ,postCreateHanabiR,postJoinHanabiR,postUnjoinHanabiR
   ,getGameEventReceiveR,getLobbyEventReceiveR,getPlayerEventReceiveR
@@ -54,6 +54,7 @@ import Safe (readMay)
 ---- - xxx hint chooser is horrible
 ---- - xxx highlight selected hints in red
 ---- - xxx some kind of nicer thing for when cards get updated as a result of hints
+---- - xxx start game button should only show for leader
 
 
 keyToInt :: GameId -> Int
@@ -73,7 +74,7 @@ toJSONT = toJSON
 cardField, messagesField, errorField, newcardField, playerField :: Text
 discardField, playField, colorField, rankField :: Text
 replacecontentField, replaceidField, replacedataField  :: Text
-replaceCardsField, cardsField :: Text
+replaceCardsField, cardsField, highlightplayerField :: Text
 cardField        = "card"           -- Int
 playerField      = "player"    -- Int
 
@@ -95,7 +96,7 @@ replacedataField = "replacedata"
 
 replaceCardsField = "replacecards"     -- object (playerField,cardsField)
 cardsField        = "cards"            -- [html]
-
+highlightplayerField = "highlightplayer" -- int
 
 
 -- css ids
@@ -588,9 +589,14 @@ gameWidget game nm = $(widgetFile "game")
        colorKIds, rankKIds :: Int -> Text
        colorKIds n = append (colorHintID pnum) $ pack $ show n
        rankKIds n  = append (rankHintID pnum) $ pack $ show n
+
+       borderColor :: Text
+       borderColor = case gameStatus game of
+                       Running {currentP} -> if currentP == pnum then "red" else "black"
+                       _ -> "black"
      in
        [whamlet|
-           <div id=#{append "player" numText} class="curvy">
+           <div id=#{append "player" numText} class="curvy" style="border-color: #{borderColor};">
              <p>
                <b> #{succ pnum}. #{name}
              <table id=#{append numText "cards"}>
@@ -1013,6 +1019,10 @@ postPlayR =
 
         newDiscardTable :: Text
         newDiscardTable = render $ discardTable color (getDiscards g color)
+
+--        highlightPlayer :: [(Text,Value)]
+--        highlightPlayer = case gameStatus g of
+--                            Running {newCP} -> [(highlightplayer,to
 
         replaceContent = (replacecontentField, toJSON $ map object $
             (if success

@@ -132,8 +132,23 @@ function makeHintPeople () {
   $(".hintPlayerInfo").fadeIn('slow');
 }
 
+
+// Whenever something happens in the game, the server sends an object
+// filled with "events" to each player.  This function looks at all
+// the received events and updates the view appropriately.
 function handleEvents (events) {
   console.debug(events);
+
+  if ("highlightplayer" in events) {
+    var hp = events.highlightplayer;
+    for (var i=0; i < #{toJSON (length players)}; i++) {
+      if (i == hp) {
+        $("#player"+i).css("border-color","red");
+      } else {
+        $("#player"+i).css("border-color","black");
+      }
+    }
+  }
 
   if ("discard" in events) {
     var dc = events.discard;

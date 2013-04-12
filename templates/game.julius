@@ -96,34 +96,35 @@ function sendColorHint(i,c) {
     })
 }
 
+function sendRankHint(i,c) {
+  $.post("@{RankHintR}",{#{toJSON playerField}:i,
+                         #{toJSON rankField}:c},
+    function (data,s,j) {
+      $(".hintPlayerInfo").fadeOut('slow');
+      $("#typeHintTextRow").fadeOut('slow');
+      $("#colorHintButtonRow").fadeOut('slow');
+      $("#rankHintButtonRow").fadeOut('slow');
+      handleEvents(data);
+    })
+}
+
 function makeColorHint(i,b) {
   var color = b.attr("data-cardcolor");
-  b.attr("onclick","sendColorHint("+i+",\""+color+"\")");  
+  b.attr("onclick","sendColorHint("+i+",\'"+color+"\')");  
 }
 
 function makeRankHint(i,b) {
   var rank = b.attr("data-cardrank");
-  var data = {#{toJSON playerField}:i
-             ,#{toJSON rankField}:rank};
-  b.attr("onclick","sendHint2(\"@{RankHintR}\","+data+")");  
+  b.attr("onclick","sendRankHint("+i+",\'"+rank+"\')");
 }
 
 function makeHintTypes(i) {
-  $(".colorHintButton").each(function() {makeColorHint(i,$(this))});
-  $(".rankHintButton").each(function() {makeRankHint(i,$(this))});
+  $("button.colorHintButton").each(function() {makeColorHint(i,$(this))});
+  $("button.rankHintButton").each(function() {makeRankHint(i,$(this))});
   $("#typeHintTextRow").fadeIn('slow');
   $("#colorHintButtonRow").fadeIn('slow');
   $("#rankHintButtonRow").fadeIn('slow');
 }
-
-// This sends a hint to the server
-function sendHint2 (dest,data) {
-  $.post(dest,data,
-         function (data,s,j) {
-           handleEvents (data);
-         });
-}
-
 
 
 // makes the player names appear and work

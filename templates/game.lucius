@@ -123,4 +123,5 @@ tr.knowledgerow {
 
 td.knowledgecell {
   height:20px;
+  text-align:center;
 }

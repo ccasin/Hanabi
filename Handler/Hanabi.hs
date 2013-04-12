@@ -749,7 +749,6 @@ getLobbyEventReceiveR = do
 hintHandler :: Int -> Either Color Rank -> Handler RepJson
 hintHandler hintedPN e = do
   nm         <- requireName
---  routeRenderer <- getUrlRender
   renderParams  <- getUrlRenderParams
   let render h = pack $ renderHtml $ h renderParams
   (g,result) <- requireGameTransaction (\gid game ->
@@ -781,11 +780,6 @@ hintHandler hintedPN e = do
                    (object (hintedPlayerCardUpdates : actions messageHinted)))
              hintedPlayerChan
        jsonToRepJson $ object $ actions messageHinter
-         -- Things to return:
-         -- highlighted cards, updated knowledge, updated hints
---  let 
---  mapM_ (maybe (return ()) (flip sendMessage $ object (messages $ Just nm))) playerChans
---  jsonToRepJson $ object $ messages Nothing
       where
         hintIdField :: Int -> Text
         hintIdField card = 
@@ -843,9 +837,6 @@ hintHandler hintedPN e = do
         actions :: Text -> [(Text,Value)]
         actions message = [contentUpdates,(messagesField,toJSON message)]
         
-
-        
-
 postColorHintR :: Handler RepJson
 postColorHintR = do
   (p,ctext) <- runInputPost iform
@@ -859,8 +850,19 @@ postColorHintR = do
     iform = (,) <$> ireq intField playerField
                 <*> ireq textField colorField
 
-postRankHintR :: Handler ()
-postRankHintR = undefined
+postRankHintR :: Handler RepJson
+postRankHintR = do
+  (p,ctext) <- runInputPost iform
+  $(logDebug) $ ctext
+  case readMay $ unpack ctext of
+    Just r  -> hintHandler p $ Right r
+    Nothing -> 
+      jsonToRepJson $ object $ [(errorField,
+        toJSONT "Invalid hint input.  Please try refreshing your page")] -- XXX
+  where
+    iform :: FormInput App App (Int,Text)
+    iform = (,) <$> ireq intField playerField
+                <*> ireq textField rankField
 
 -- XXX these can be better cleaned up and combined
 postActionHandler :: Show a => FormInput App App a  -- XXX show

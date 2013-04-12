@@ -132,7 +132,7 @@ function makeHintPeople () {
 }
 
 function handleEvents (events) {
-//  console.debug(events);
+  console.debug(events);
 
   if ("discard" in events) {
     var dc = events.discard;
@@ -163,7 +163,7 @@ function handleEvents (events) {
     for (var i=0; i < rc.length; i++) {
       $("#"+rc[i].replaceid).html(rc[i].replacedata);
     }
-  }
+  };
 
   if ("replacecards" in events) {
     var rc = events.replacecards;
@@ -171,7 +171,7 @@ function handleEvents (events) {
     var cardRow = $("#"+player+#{toJSON cardRowID});
     for (var i = 1; i <= rc.cards.length; i++) {
       var card = cardRow.children("td:nth-child("+i+")");
-      card.html(rc.cards[i]);
+      card.html(rc.cards[(i-1)]);
     }
   }
 }

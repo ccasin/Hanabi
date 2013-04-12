@@ -551,7 +551,7 @@ gameWidget :: Game -> Text -> Widget
 gameWidget game nm = $(widgetFile "game")
   where
     players,otherPlayers :: [(Int,Player)]
-    players      = zip [1..] $ gamePlayers game
+    players      = zip [0..] $ gamePlayers game
     otherPlayers = filter (\(_,p) -> nm /= playerName p) players
             
     allRanks :: [Rank]
@@ -563,7 +563,7 @@ gameWidget game nm = $(widgetFile "game")
     mynum = 
       case find ((==nm) . playerName . snd) players of
          Nothing    -> 0 -- XXX return an error or something
-         Just (n,_) -> n-1
+         Just (n,_) -> n
 
     mychan :: Text
     mychan = playerChanId (gamePlayers game !! mynum)
@@ -583,16 +583,16 @@ gameWidget game nm = $(widgetFile "game")
        knowledge = map snd hand
 
        numText :: Text
-       numText = pack $ show $ pnum - 1
+       numText = pack $ show $ pnum
 
        colorKIds, rankKIds :: Int -> Text
-       colorKIds n = append (colorHintID (pnum-1)) $ pack $ show n
-       rankKIds n  = append (rankHintID (pnum-1)) $ pack $ show n
+       colorKIds n = append (colorHintID pnum) $ pack $ show n
+       rankKIds n  = append (rankHintID pnum) $ pack $ show n
      in
        [whamlet|
            <div id=#{append "player" numText} class="curvy">
              <p>
-               <b> #{pnum}. #{name}
+               <b> #{succ pnum}. #{name}
              <table id=#{append numText "cards"}>
                <tr id=#{append numText cardRowID}>
                  $if nm == name
@@ -601,9 +601,9 @@ gameWidget game nm = $(widgetFile "game")
                  $else
                    $forall c <- map fst hand
                      <td> <img src=@{StaticR $ cardToRoute c}>
-               <tr id=#{colorHintID (pnum - 1)} class="knowledgerow">
+               <tr id=#{colorHintID pnum} class="knowledgerow">
                  ^{knowledgeRow colorKIds dispColorKnowledge $ map knownColor knowledge}
-               <tr id=#{rankHintID (pnum - 1)} class="knowledgerow">
+               <tr id=#{rankHintID pnum} class="knowledgerow">
                  ^{knowledgeRow rankKIds dispRankKnowledge $ map knownRank knowledge}
        |]
 
@@ -815,12 +815,12 @@ hintHandler hintedPN e = do
 
         hintedPlayerCardUpdates :: (Text,Value)
         hintedPlayerCardUpdates = (replaceCardsField, object $
-           [(playerField, toJSON (succ hintedPN)),
+           [(playerField, toJSON hintedPN),
             (cardsField, toJSON $ 
                map (\(_,k) -> pack $ renderHtml $
                        playerSecretCardTd k renderParams)
                  $ playerHand hintedP)
-            ]) -- XXX
+            ])
 
         otherPlayers :: [Text]
         otherPlayers = map playerChanId $
@@ -850,7 +850,7 @@ postColorHintR :: Handler RepJson
 postColorHintR = do
   (p,ctext) <- runInputPost iform
   case readMay $ unpack ctext of
-    Just c  -> hintHandler (pred p) $ Left c
+    Just c  -> hintHandler p $ Left c
     Nothing -> 
       jsonToRepJson $ object $ [(errorField,
         toJSONT "Invalid hint input.  Please try refreshing your page")] -- XXX

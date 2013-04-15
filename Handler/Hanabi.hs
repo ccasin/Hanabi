@@ -822,6 +822,12 @@ hintHandler hintedPN e = do
                  $ playerHand hintedP)
             ])
 
+        highlightPlayer :: (Text,Value)
+        highlightPlayer = case gameStatus g of
+                            Running {currentP=newCP} -> 
+                                 (highlightplayerField,toJSON $ newCP)
+                            _ -> (highlightplayerField,toJSON $ (-1 :: Int))
+
         otherPlayers :: [Text]
         otherPlayers = map playerChanId $
           filter (\p -> (playerName p /= nm) && (playerName p /= playerName hintedP))
@@ -841,7 +847,7 @@ hintHandler hintedPN e = do
                                  " a hint about their ", hintDesc,"."]
 
         actions :: Text -> [(Text,Value)]
-        actions message = [contentUpdates,(messagesField,toJSON message)]
+        actions message = [highlightPlayer,contentUpdates,(messagesField,toJSON message)]
         
 postColorHintR :: Handler RepJson
 postColorHintR = do
@@ -946,7 +952,13 @@ postDiscardR =
 
         color :: Color
         color = cardColor oldcard
-    
+
+        highlightPlayer :: (Text,Value)
+        highlightPlayer = case gameStatus g of
+                            Running {currentP=newCP} -> 
+                                 (highlightplayerField,toJSON $ newCP)
+                            _ -> (highlightplayerField,toJSON $ (-1 :: Int))
+
         newDiscardTable :: Text
         newDiscardTable = render $ discardTable color (getDiscards g color)
 
@@ -959,7 +971,8 @@ postDiscardR =
             ,(replacedataField, toJSONT $ render $ deckTdContent $ length $ gameDeck g)]
           ])
       return (\me ->
-        [(discardField,object $
+        [highlightPlayer
+        ,(discardField,object $
               [(playerField,toJSON currentP)
               ,(cardField,toJSON (oldcardi))]
            ++ maybe [] (\r -> [(newcardField, toJSONT r)]) (newcardRoute me))
@@ -1020,9 +1033,11 @@ postPlayR =
         newDiscardTable :: Text
         newDiscardTable = render $ discardTable color (getDiscards g color)
 
---        highlightPlayer :: [(Text,Value)]
---        highlightPlayer = case gameStatus g of
---                            Running {newCP} -> [(highlightplayer,to
+        highlightPlayer :: (Text,Value)
+        highlightPlayer = case gameStatus g of
+                            Running {currentP=newCP} -> 
+                                 (highlightplayerField,toJSON $ newCP)
+                            _ -> (highlightplayerField,toJSON $ (-1 :: Int))
 
         replaceContent = (replacecontentField, toJSON $ map object $
             (if success
@@ -1043,7 +1058,8 @@ postPlayR =
               ])
 
       return (\me ->
-        [(playField,object $
+        [highlightPlayer
+        ,(playField,object $
               [(playerField,toJSON currentP)
               ,(cardField,toJSON (oldcardi))]
            ++ maybe [] (\r -> [(newcardField, toJSONT r)]) (newcardRoute me))

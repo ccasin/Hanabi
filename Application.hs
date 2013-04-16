@@ -28,6 +28,8 @@ import Control.Concurrent.Chan (newChan)
 -- Don't forget to add new modules to your cabal file!
 import Handler.Home
 import Handler.Hanabi
+import Handler.Infrastructure (getSetNameR,postSetNameR)
+import Handler.Lobby (getHanabiLobbyR,getLobbyEventReceiveR)
 
 -- This line actually creates our YesodDispatch instance. It is the second half
 -- of the call to mkYesodData which occurs in Foundation.hs. Please see the

@@ -20,6 +20,8 @@ library
                      Settings.StaticFiles
                      Settings.Development
                      Handler.Home
+                     Handler.Infrastructure
+                     Handler.Lobby
                      Handler.Hanabi
 
     if flag(dev) || flag(library-only)

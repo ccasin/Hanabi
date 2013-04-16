@@ -1,8 +1,7 @@
 module Handler.Hanabi 
-  (getHanabiLobbyR,getPlayHanabiR,getStartHanabiR
+  (getPlayHanabiR,getStartHanabiR
   ,postCreateHanabiR,postJoinHanabiR,postUnjoinHanabiR
-  ,getGameEventReceiveR,getLobbyEventReceiveR,getPlayerEventReceiveR
-  ,getSetNameR,postSetNameR
+  ,getGameEventReceiveR,getPlayerEventReceiveR
   ,getDumpTablesR  -- XXX
   ,postColorHintR,postRankHintR,postDiscardR,postPlayR)
    
@@ -12,27 +11,26 @@ where
 import Import
 
 import Data.Maybe (isJust,fromMaybe)
-import Data.IORef
-import Data.Text (pack,unpack,append,strip)
-import qualified Data.Text as T (concat,length)
+import Data.Text (pack,unpack,append)
+import qualified Data.Text as T (concat)
 
-import Data.Aeson hiding (object)
 import Data.Aeson.TH
 
-import Control.Monad (liftM,when,unless)
+import Control.Monad (liftM)
 import Control.Concurrent.Chan
 
-import Blaze.ByteString.Builder (fromLazyByteString)
 import Text.Blaze.Html.Renderer.String (renderHtml)
 
-import System.Random (randomRIO)
-import Data.List (foldl',find,(\\))
+import Data.List (find,(\\))
 -- import qualified Data.Traversable as Trav (mapM)
 
 import Yesod.Auth
 import Network.Wai.EventSource
 
 import Safe (readMay)
+
+import Handler.Infrastructure
+
 
 ----  
 ---- TODO
@@ -55,59 +53,13 @@ import Safe (readMay)
 ---- - xxx highlight selected hints in red
 ---- - xxx some kind of nicer thing for when cards get updated as a result of hints
 ---- - xxx start game button should only show for leader
-
-
-keyToInt :: GameId -> Int
-keyToInt gid = 
-  case fromPersistValue $ unKey gid of
-    Left _  -> 0
-    Right i -> i
+---- - xxx actions should go away after turn
+---- - xxx what to do if channel lookup fails
 
 toJSONT :: Text -> Value
 toJSONT = toJSON
 
-------------------------------------
------- Some constant strings -------
 
--- object fields
-
-cardField, messagesField, errorField, newcardField, playerField :: Text
-discardField, playField, colorField, rankField :: Text
-replacecontentField, replaceidField, replacedataField  :: Text
-replaceCardsField, cardsField, highlightplayerField :: Text
-cardField        = "card"           -- Int
-playerField      = "player"    -- Int
-
-discardField     = "discard"        -- object (cardField,playerField,newcardfield (opt))
-playField        = "play"           -- object (cardField,playerField,newcardfield (opt))
-
-colorField       = "color"
-rankField        = "rank"
-
-messagesField    = "msgs"            -- [String]
-errorField       = "error"          -- String
-
-newcardField     = "newcard"        -- Route
-
-replacecontentField = "replacecontent" -- object (replaceid,replacedata)
-                                       -- an id, and the content
-replaceidField = "replaceid"
-replacedataField = "replacedata"
-
-replaceCardsField = "replacecards"     -- object (playerField,cardsField)
-cardsField        = "cards"            -- [html]
-highlightplayerField = "highlightplayer" -- int
-
-
--- css ids
-cardRowID, colorRowID, rankRowID :: Text
-cardRowID  = "CardRow"
-colorRowID = "ColorRow"
-rankRowID  = "RankRow"
-
-colorHintID,rankHintID :: Int -> Text
-colorHintID i = append (pack $ show i) colorRowID
-rankHintID  i = append (pack $ show i) rankRowID
 
 ---------------------------------------
 ------- How to display knowledge ------
@@ -136,90 +88,6 @@ dispColorKnowledge = dispKnowledge htmlColor
 dispRankKnowledge :: Fact Rank -> HtmlUrl (Route App)
 dispRankKnowledge = dispKnowledge htmlRank
 
------------------------------
------- The channel map ------
-
-getChannel :: Text -> Handler (Chan ServerEvent)
-getChannel guid =
-  do iochans <- liftM gameChannels getYesod
-     chans <- liftIO $ readIORef iochans
-     case lookup guid chans of
-       Just chan -> return chan
-       Nothing   -> notFound
-           -- XXX make a new channel?  remove game from DB?
-
-newChannel :: Handler Text
-newChannel =
-  do uniqueid <- liftIO $ liftM (pack . show) 
-                        $ randomRIO (1 :: Int,1000000000)
-     mdup <- runDB $ getBy (UniqueUid uniqueid)
-     case mdup of
-       Just _ -> newChannel
-       Nothing -> do
-         iochans  <- liftM gameChannels getYesod
-         newc     <- liftIO newChan
-         liftIO $ modifyIORef iochans ((uniqueid,newc):)
-         return uniqueid
-
-deleteChan :: Text -> Handler ()
-deleteChan nm =
-  do iochans <- liftM gameChannels getYesod
-     liftIO $ modifyIORef iochans $
-       foldl' (\cs (nm',c) -> if nm == nm' then cs else (nm',c):cs)
-              []
-
-sendMessage :: ToJSON a => Chan ServerEvent -> a -> Handler ()
-sendMessage chan msg = liftIO $ writeChan chan 
-                     $ ServerEvent Nothing Nothing 
-                       [fromLazyByteString $ encode msg]
-
---------------------------
------- Session stuff -----
-sgameid :: Text
-sgameid = "gameid" 
-
-
-lookupGame :: Handler (Maybe Text)
-lookupGame = lookupSession sgameid
-
-requireName :: Handler Text
-requireName = do
-  Entity _ user <- requireAuth
-  case userName user of
-    "" -> redirect SetNameR
-    nm -> return nm
-
-requireGame :: Handler Game
-requireGame = do
-  mguid <- lookupGame
-  case mguid of
-    Nothing -> redirect HanabiLobbyR
-    Just guid -> do 
-      mgame <- runDB $ getBy $ UniqueUid guid
-      case mgame of
-        Nothing -> do deleteSession sgameid
-                      redirect HanabiLobbyR
-        Just (Entity _ g) -> return g
-
-requireGameTransaction :: (GameId -> Game -> YesodDB App App a) -> Handler a
-requireGameTransaction trans = do
-  mguid <- lookupGame
-  res <- case mguid of 
-           Nothing  -> redirect HanabiLobbyR
-           Just guid -> runDB $ do
-             mgame <- getBy $ UniqueUid guid
-             case mgame of
-               Nothing -> return Nothing
-               Just (Entity gid g) -> liftM Just $ trans gid g
-  case res of
-    Nothing -> do deleteSession sgameid
-                  redirect HanabiLobbyR
-    Just g -> return g
-
-nameForm :: Form Text
-nameForm = renderDivs $ areq textField "" {fsAttrs = [("maxLength","20")]} Nothing
---------------------------
---------------------------
 
 ----------------------------------------------------------
 ---- Small bits of HTML for various parts of the page ----
@@ -234,48 +102,7 @@ strikesTdContent :: Int -> HtmlUrl a
 strikesTdContent i = [hamlet|<b>Strikes:</b> #{i}|]
 
 --------------------------
------ EVENTS -------------
-
-
--- events for the main list of games
-data GameListEvent = GLEAddGame   
-                   | GLEDeleteGame Bool -- Is this the last game?
-                   | GLEUpdatePlayers 
-$(deriveJSON id ''GameListEvent)
-
-data GameListMsg = GameListMsg {glmEType   :: GameListEvent,
-                                glmGUID    :: Text,
-                                glmPlayers :: [Text]}
-$(deriveJSON (drop 3) ''GameListMsg)
-
-
--- events for individual game lobbies
-data PlayerListEvent = PLEJoin | PLELeave {pleNewLeader :: Maybe Text} | PLEStart
-$(deriveJSON (drop 3) ''PlayerListEvent)
-
-data PlayerListMsg = PlayerListMsg {plmEType :: PlayerListEvent,
-                                    plmPlayer :: Text,
-                                    plmPlayers :: [Text]}
-$(deriveJSON (drop 3) ''PlayerListMsg)
 --------------------------
---------------------------
-
-getSetNameR :: Handler RepHtml
-getSetNameR =
-  do Entity _ user <- requireAuth
-     (widget,enctype) <- generateFormPost nameForm
-     defaultLayout [whamlet|
-       <p>Welcome to Hanabi <b>#{userCredID user}</b>.
-            
-
-       <p>Please chose a nickname.  This will be visible to other players.
-                 
-       <form method=post action=@{SetNameR} enctype=#{enctype}>
-          ^{widget}
-          <input type=submit value="Set nickname">
-     |]
-
-data NameResult = NameSuccess | NameTaken | NameInvalid
 
 --- XXX MUST REMOVE
 getDumpTablesR :: Handler RepHtml
@@ -294,28 +121,6 @@ getDumpTablesR =
                  <td>#{userName p}
        |]
       
-
-postSetNameR :: Handler ()
-postSetNameR =
-  do uid <- requireAuthId
-     ((result, _), _) <- runFormPost nameForm
-     case result of
-       FormSuccess nmUnsanitized -> do
-         let nm = strip nmUnsanitized
-         nmResult <- if T.length nm < 1 then return NameInvalid else runDB $ do 
-           taken <- liftM isJust $ getBy $ UniqueName nm
-           unless taken $ update uid [UserName =. nm]
-           return $ if taken then NameTaken else NameSuccess
-         case nmResult of
-           NameSuccess -> redirect HanabiLobbyR
-           NameTaken -> do
-            setMessage $ toHtml $ T.concat ["Sorry, ",nm," is taken."]
-            redirect SetNameR
-           NameInvalid -> do
-            setMessage $ toHtml $ T.concat ["Sorry, ",nm," is not a valid name."]
-            redirect SetNameR
-       _ -> do setMessage "Please Enter a valid name."
-               redirect SetNameR
 
 postCreateHanabiR :: Handler ()
 postCreateHanabiR = do
@@ -452,60 +257,6 @@ getStartHanabiR = do
                                            (map playerName $ gamePlayers game)
   redirect PlayHanabiR
 
-                 
-playerListWidget :: Text -> Game -> Widget
-playerListWidget nm game =
-  let names = prettyNameList game
-      guid = gameUid game
-  in
-  do playerList <- lift newIdent
-     mbox <- lift newIdent
-     startButton <- lift newIdent
-     [whamlet|
-       <p id=#{mbox}>
-       <p id=#{playerList}>#{names}
-       
-       <table>
-         <tr>
-           $if nm == gameLeader game
-             <td id=#{startButton}>
-               <form method=get action=@{StartHanabiR}>
-                   <input type=submit value="Start the game">
-           $else
-             <td id=#{startButton} class="hidden">
-               <form method=get action=@{StartHanabiR}>
-                   <input type=submit value="Start the game">
-           <td>
-             <form method=post action=@{UnjoinHanabiR}>
-               <input type=submit value="Leave the game">
-                       
-     |] -- XXX grey out start box
-     toWidgetBody [julius|
-        var list = document.getElementById(#{toJSON playerList});
-        var mbox = document.getElementById(#{toJSON mbox});
-        var name = #{toJSON nm};
-        var startButton = document.getElementById(#{toJSON startButton});
-
-        var src = new EventSource("@{GameEventReceiveR guid}");
-
-        src.onmessage = function(msg) {
-          var event = JSON.parse(msg.data);
-          var etype = event.EType;
-          if ("PLEJoin" in etype) {
-            mbox.innerHTML = event.Player + " joined the game.";
-          } else if ("PLELeave" in etype) {
-            mbox.innerHTML = event.Player + " left the game.";
-            if (etype.PLELeave.NewLeader == name) {
-               mbox.innerHTML += "  You are now the leader";
-               $(startButton).fadeIn(400,function() {$(startButton).removeClass();});
-            }
-          } else if ("PLEStart" in etype) {
-            location.reload(true);
-          }
-
-          list.innerHTML = displayPlayerList(event.Players);
-        }; 
-     |]
 
 
 discardTableId :: Color -> Text
@@ -613,6 +364,61 @@ gameWidget game nm = $(widgetFile "game")
                  ^{knowledgeRow rankKIds dispRankKnowledge $ map knownRank knowledge}
        |]
 
+
+playerListWidget :: Text -> Game -> Widget
+playerListWidget nm game =
+  let names = prettyNameList game
+      guid = gameUid game
+  in
+  do playerList <- lift newIdent
+     mbox <- lift newIdent
+     startButton <- lift newIdent
+     [whamlet|
+       <p id=#{mbox}>
+       <p id=#{playerList}>#{names}
+       
+       <table>
+         <tr>
+           $if nm == gameLeader game
+             <td id=#{startButton}>
+               <form method=get action=@{StartHanabiR}>
+                   <input type=submit value="Start the game">
+           $else
+             <td id=#{startButton} class="hidden">
+               <form method=get action=@{StartHanabiR}>
+                   <input type=submit value="Start the game">
+           <td>
+             <form method=post action=@{UnjoinHanabiR}>
+               <input type=submit value="Leave the game">
+                       
+     |] -- XXX grey out start box
+     toWidgetBody [julius|
+        var list = document.getElementById(#{toJSON playerList});
+        var mbox = document.getElementById(#{toJSON mbox});
+        var name = #{toJSON nm};
+        var startButton = document.getElementById(#{toJSON startButton});
+
+        var src = new EventSource("@{GameEventReceiveR guid}");
+
+        src.onmessage = function(msg) {
+          var event = JSON.parse(msg.data);
+          var etype = event.EType;
+          if ("PLEJoin" in etype) {
+            mbox.innerHTML = event.Player + " joined the game.";
+          } else if ("PLELeave" in etype) {
+            mbox.innerHTML = event.Player + " left the game.";
+            if (etype.PLELeave.NewLeader == name) {
+               mbox.innerHTML += "  You are now the leader";
+               $(startButton).fadeIn(400,function() {$(startButton).removeClass();});
+            }
+          } else if ("PLEStart" in etype) {
+            location.reload(true);
+          }
+
+          list.innerHTML = displayPlayerList(event.Players);
+        }; 
+     |]
+
 getPlayHanabiR :: Handler RepHtml
 getPlayHanabiR = do
   nm <- requireName
@@ -626,92 +432,6 @@ getPlayHanabiR = do
     _ -> defaultLayout $ gameWidget game nm
       -- XXX do I really want all other statuses to display gameWidget?
       -- XXX check that this player is actually in the game - people could pass around cookies
-
-gameListWidget :: [Entity Game] -> Widget
-gameListWidget games = do
-  do glistI <- lift newIdent
-     instructionsI <- lift newIdent
-     gplayersC <- lift newIdent
-     let nogames,somegames :: Text
-         nogames = "There are no games waiting for players."
-         somegames = (         "You can join a game or create a new one.  "
-                      `append` "These games haven't started yet:")
-     toWidgetHead [lucius|
-        .newGame {
-          display: none;
-        }
-      |]
-     [whamlet|
-       <p id=#{instructionsI}>
-         $if null games
-           #{nogames}
-         $else 
-           #{somegames}
-            
-       <ul id=#{glistI}>
-         $forall Entity _ g <- games
-           <li id="#{gameUid g}">
-             <form method=post action=@{JoinHanabiR (gameUid g)}>
-                <input type=submit value="Game #{gameUid g}">
-             <p class=#{gplayersC}>
-               #{prettyNameList g}
-       |]
-     toWidgetBody [julius|
-        var src = new EventSource("@{LobbyEventReceiveR}");
-        src.onmessage = function(msg) {
-          var event = JSON.parse(msg.data);
-          var etype = event.EType;
-          if ("GLEAddGame" in etype) {
-            var newli = $('<li>');
-            var newform = $('<form>');
-            var newbutton = $('<input>');
-            var newp = $('<p>');
-
-            $(newli).attr('id',event.GUID);
-            $(newli).attr('class','newGame');
-
-            $(newform).attr('method','post');
-            $(newform).attr('action','joinhanabi/'+event.GUID);
-
-            $(newbutton).attr('type','submit');
-            $(newbutton).attr('value','Game '+event.GUID);
-            
-            $(newp).attr('class',#{toJSON gplayersC});
-            $(newp).append(displayPlayerList(event.Players));
-
-            $(newform).append(newbutton);
-            $(newli).append(newform).append(newp);
-            $("#"+#{toJSON instructionsI}).text(#{toJSON somegames});
-            $("#"+#{toJSON glistI}).prepend(newli);
-            $(newli).slideDown(400,function() {$(newli).removeClass();});
-          } else if ("GLEDeleteGame" in etype) {
-            if (etype.GLEDeleteGame) {
-              $("#"+#{toJSON instructionsI}).text(#{toJSON nogames});
-            };
-            var gamediv = $("#"+event.GUID);
-            gamediv.fadeOut("slow",function () {gamediv.remove()});
-          } else if ("GLEUpdatePlayers" in etype) {
-            $("#"+event.GUID+">."+#{toJSON gplayersC}).
-                 text(displayPlayerList(event.Players));
-          }
-        }; |]
-
-
-getHanabiLobbyR :: Handler RepHtml
-getHanabiLobbyR =
-  do nm <- requireName
-     mguid <- lookupSession sgameid
-     when (isJust mguid) $ redirect PlayHanabiR
-     games <- runDB $ selectList [GameStatus ==. NotStarted] []
-     defaultLayout [whamlet|
-         <p>Welcome to Hanabi, #{nm}.
-                    
-         ^{gameListWidget games}
-
-         <p>
-           <form method=post action=@{CreateHanabiR}>
-              <input type=submit value="Create a new game">
-      |]
 
 
 -----------------------------------------
@@ -739,15 +459,6 @@ getPlayerEventReceiveR uid = do
   res <- lift $ eventSourceAppChan chan req
   sendWaiResponse res
 
-getLobbyEventReceiveR :: Handler ()
-getLobbyEventReceiveR = do
-  chan0 <- liftM lobbyChannel getYesod
-  chan <- liftIO $ dupChan chan0
-  req <- waiRequest
-  res <- lift $ eventSourceAppChan chan req
-  sendWaiResponse res
-
-
 ---------------------------------------
 ----- Game event handlers (AJAX) ------
 
@@ -774,17 +485,11 @@ hintHandler hintedPN e = do
   case result of
     Left err            -> jsonToRepJson $ object [(errorField,err)]
     Right (hintedP,hintedCards) -> do 
-       iochans <- liftM gameChannels getYesod
-       chans <- liftIO $ readIORef iochans
-       let
-         otherPlayerChans = map (flip lookup chans) otherPlayers -- XXX log if any nothings?
-         hintedPlayerChan = lookup (playerChanId hintedP) chans
-       mapM_ (maybe (return ()) (flip sendMessage $ object (actions messageOther)))
-             otherPlayerChans
-       maybe (return ()) 
-             (flip sendMessage 
-                   (object (hintedPlayerCardUpdates : actions messageHinted)))
-             hintedPlayerChan
+       otherPlayerChans <- getChannels otherPlayers
+       hintedPlayerChan <- getChannel $ playerChanId hintedP
+       mapM_ (flip sendMessage $ object (actions messageOther)) otherPlayerChans
+       sendMessage hintedPlayerChan
+                   (object (hintedPlayerCardUpdates : actions messageHinted))
        jsonToRepJson $ object $ actions messageHinter
       where
         hintIdField :: Int -> Text
@@ -903,13 +608,11 @@ postActionHandler inputform attemptaction handleresult = do
     case result of 
       Left err -> return $ const [(errorField,toJSONT err)]
       Right (cp,b)  -> handleresult g cp b
-  iochans <- liftM gameChannels getYesod
-  chans <- liftIO $ readIORef iochans
   let otherPlayers :: [Text]
       otherPlayers = map playerChanId $
          filter ((/= nm) . playerName) $ gamePlayers g
-      playerChans = map (flip lookup chans) otherPlayers -- XXX log if any nothings?
-  mapM_ (maybe (return ()) (flip sendMessage $ object (messages $ Just nm))) playerChans
+  playerChans <- getChannels otherPlayers
+  mapM_ (flip sendMessage $ object (messages $ Just nm)) playerChans
   jsonToRepJson $ object $ messages Nothing
         
 

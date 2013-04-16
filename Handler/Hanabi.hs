@@ -462,6 +462,28 @@ getPlayerEventReceiveR uid = do
 ---------------------------------------
 ----- Game event handlers (AJAX) ------
 
+-- The "GameEvent" type describes any kind of state change that we
+-- want to tell the clients about.  We send these at two times:
+-- 1) in response to AJAX game action requests
+-- 2) asynchonously via an EventSource when one player does something
+--    and the other players' views need to be updated.
+data ContentUpdate = ContentUpdate {cuReplaceId   :: Text,
+                                    cuReplaceData :: Text}
+$(deriveJSON (drop 2) ''ContentUpdate)
+
+data GameEvent = GEHighlightPlayer Int
+               | GEDiscard {geDiscPlayer  :: Int,
+                            geDiscCard    :: Int,
+                            geDiscNewCard :: Maybe Text}
+               | GEPlay {gePlayPlayer  :: Int,
+                         gePlayCard    :: Int,
+                         gePlayNewCard :: Maybe Text}
+               | GEMessages [Text]
+               | GEReplaceContent [ContentUpdate]
+               | GEReplaceCards {geReplPlayer :: Int,
+                                 geReplCards  :: [Text]}
+$(deriveJSON (drop 6) ''GameEvent)
+
 -- XXX check for game end
 hintHandler :: Int -> Either Color Rank -> Handler RepJson
 hintHandler hintedPN e = do
@@ -490,8 +512,12 @@ hintHandler hintedPN e = do
        mapM_ (flip sendMessage $ object (actions messageOther)) otherPlayerChans
        sendMessage hintedPlayerChan
                    (object (hintedPlayerCardUpdates : actions messageHinted))
-       jsonToRepJson $ object $ actions messageHinter
+--       jsonToRepJson $ object $ actions messageHinter
+       jsonToRepJson $ toJSON foo
       where
+        foo :: [GameEvent]
+        foo = undefined
+
         hintIdField :: Int -> Text
         hintIdField card = 
           append (case e of
@@ -770,3 +796,5 @@ postPlayR =
         ,replaceContent])
   in
     postActionHandler inputForm attemptAction handleResult
+
+

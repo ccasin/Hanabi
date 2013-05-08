@@ -56,6 +56,10 @@ import Handler.Infrastructure
 ---- - xxx actions should go away after turn
 ---- - xxx what to do if channel lookup fails
 
+
+----- - XXX maybes do null, not just disappear in the js - rething play/discard
+----- - XXX errors go to all players right now
+
 toJSONT :: Text -> Value
 toJSONT = toJSON
 

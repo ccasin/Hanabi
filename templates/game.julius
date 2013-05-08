@@ -139,55 +139,62 @@ function makeHintPeople () {
 function handleEvents (events) {
   console.debug(events);
 
-  if ("highlightplayer" in events) {
-    var hp = events.highlightplayer;
-    for (var i=0; i < #{toJSON (length players)}; i++) {
-      if (i == hp) {
-        $("#player"+i).css("border-color","red");
-      } else {
-        $("#player"+i).css("border-color","black");
+  // xxx handle GEError
+
+  for (var ei=0; ei < events.length; ei++) {
+    var event = events[ei];
+    
+    if ("GEHighlightPlayer" in event) {
+      var hp = event.GEHighlightPlayer;
+      for (var i=0; i < #{toJSON (length players)}; i++) {
+        if (i == hp) {
+          $("#player"+i).css("border-color","red");
+        } else {
+          $("#player"+i).css("border-color","black");
+        }
       }
     }
-  }
-
-  if ("discard" in events) {
-    var dc = events.discard;
-    if ("newcard" in dc) {
-      removeCardAddCard(dc.player, dc.card, dc.newcard);
-    } else {
-      removeCard(dc.player, dc.card);
-    }
-  };
-
-  if ("play" in events) {
-    var p = events.play;
-    if ("newcard" in p) {
-      removeCardAddCard(p.player, p.card, p.newcard);
-    } else {
-      removeCard(p.player, p.card);
-    }
-  };
-
-  if ("messages" in events) {
-    for (var i=0; i < events.messages.length;  i++) {
-      displayMessage(events.messages[i]);
-    }
-  };
-
-  if ("replacecontent" in events) {
-    var rc = events.replacecontent;
-    for (var i=0; i < rc.length; i++) {
-      $("#"+rc[i].replaceid).html(rc[i].replacedata);
-    }
-  };
-
-  if ("replacecards" in events) {
-    var rc = events.replacecards;
-    var player = rc.player;
-    var cardRow = $("#"+player+#{toJSON cardRowID});
-    for (var i = 1; i <= rc.cards.length; i++) {
-      var card = cardRow.children("td:nth-child("+i+")");
-      card.html(rc.cards[(i-1)]);
+  
+    if ("GEDiscard" in event) {
+      var dc = event.GEDiscard;
+      if ("NewCard" in dc) {
+        removeCardAddCard(dc.Player, dc.Card, dc.NewCard);
+      } else {
+        removeCard(dc.Player, dc.Card);
+      }
+    };
+  
+    if ("GEPlay" in event) {
+      var p = event.GEPlay;
+      if ("NewCard" in p) {
+        removeCardAddCard(p.Player, p.Card, p.NewCard);
+      } else {
+        removeCard(p.Player, p.Card);
+      }
+    };
+  
+    if ("GEMessages" in event) {
+      var msgs = event.GEMessages;
+      for (var i=0; i < msgs.length;  i++) {
+        displayMessage(msgs[i]);
+      }
+    };
+  
+    if ("GEReplaceContent" in event) {
+      var rc = event.GEReplaceContent;
+      for (var i=0; i < rc.length; i++) {
+        $("#"+rc[i].ReplaceId).html(rc[i].ReplaceData);
+      }
+    };
+  
+    if ("GEReplaceCards" in event) {
+      var rc = event.GEReplaceCards;
+      var player = rc.Player;
+      var cardRow = $("#"+player+#{toJSON cardRowID});
+      for (var i = 1; i <= rc.Cards.length; i++) {
+        var card = cardRow.children("td:nth-child("+i+")");
+        card.html(rc.Cards[(i-1)]);
+      }
     }
   }
 }

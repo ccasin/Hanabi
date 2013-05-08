@@ -472,6 +472,7 @@ data ContentUpdate = ContentUpdate {cuReplaceId   :: Text,
 $(deriveJSON (drop 2) ''ContentUpdate)
 
 data GameEvent = GEHighlightPlayer Int
+               | GEUnhighlightPlayer
                | GEDiscard {geDiscPlayer  :: Int,
                             geDiscCard    :: Int,
                             geDiscNewCard :: Maybe Text}
@@ -479,6 +480,7 @@ data GameEvent = GEHighlightPlayer Int
                          gePlayCard    :: Int,
                          gePlayNewCard :: Maybe Text}
                | GEMessages [Text]
+               | GEError Text
                | GEReplaceContent [ContentUpdate]
                | GEReplaceCards {geReplPlayer :: Int,
                                  geReplCards  :: [Text]}
@@ -509,15 +511,11 @@ hintHandler hintedPN e = do
     Right (hintedP,hintedCards) -> do 
        otherPlayerChans <- getChannels otherPlayers
        hintedPlayerChan <- getChannel $ playerChanId hintedP
-       mapM_ (flip sendMessage $ object (actions messageOther)) otherPlayerChans
+       mapM_ (flip sendMessage $ actions messageOther) otherPlayerChans
        sendMessage hintedPlayerChan
-                   (object (hintedPlayerCardUpdates : actions messageHinted))
---       jsonToRepJson $ object $ actions messageHinter
-       jsonToRepJson $ toJSON foo
+                   (hintedPlayerCardUpdates : actions messageHinted)
+       jsonToRepJson $ actions messageHinter
       where
-        foo :: [GameEvent]
-        foo = undefined
-
         hintIdField :: Int -> Text
         hintIdField card = 
           append (case e of
@@ -532,32 +530,24 @@ hintHandler hintedPN e = do
         dispFact :: Knowledge -> Text
         dispFact k = pack $ renderHtml $ htmlFact k renderParams
         
-        knowlUpdates :: [[(Text,Value)]]
-        knowlUpdates =
-          map (\(cnum,(_,k)) -> [(replaceidField, toJSONT $ hintIdField cnum),
-                                 (replacedataField, toJSONT $ dispFact k)])
-              (zip [1..] $ playerHand hintedP)
-
-        contentUpdates :: (Text,Value)
-        contentUpdates = (replacecontentField, toJSON $ map object $
-             [(replaceidField, toJSONT "hintstd")
-             ,(replacedataField, toJSON $ render $ hintsTdContent $ gameHints g)]
-           : knowlUpdates)
-
-        hintedPlayerCardUpdates :: (Text,Value)
-        hintedPlayerCardUpdates = (replaceCardsField, object $
-           [(playerField, toJSON hintedPN),
-            (cardsField, toJSON $ 
-               map (\(_,k) -> pack $ renderHtml $
+        hintedPlayerCardUpdates :: GameEvent
+        hintedPlayerCardUpdates = 
+          GEReplaceCards {geReplPlayer=hintedPN,
+                          geReplCards=
+            map (\(_,k) -> pack $ renderHtml $
                        playerSecretCardTd k renderParams)
-                 $ playerHand hintedP)
-            ])
+              $ playerHand hintedP}
 
-        highlightPlayer :: (Text,Value)
+        contentUpdates :: GameEvent
+        contentUpdates = GEReplaceContent $
+             (ContentUpdate "hintstd" (render $ hintsTdContent $ gameHints g))
+           : map (\(cnum,(_,k)) -> ContentUpdate (hintIdField cnum) (dispFact k))
+                 (zip [1..] $ playerHand hintedP)
+
+        highlightPlayer :: GameEvent
         highlightPlayer = case gameStatus g of
-                            Running {currentP=newCP} -> 
-                                 (highlightplayerField,toJSON $ newCP)
-                            _ -> (highlightplayerField,toJSON $ (-1 :: Int))
+                            Running {currentP=newCP} -> GEHighlightPlayer newCP
+                            _ -> GEUnhighlightPlayer
 
         otherPlayers :: [Text]
         otherPlayers = map playerChanId $
@@ -577,40 +567,34 @@ hintHandler hintedPN e = do
         messageOther = T.concat [nm, " gave ", playerName hintedP,
                                  " a hint about their ", hintDesc,"."]
 
-        actions :: Text -> [(Text,Value)]
-        actions message = [highlightPlayer,contentUpdates,(messagesField,toJSON message)]
+        actions :: Text -> [GameEvent]
+        actions message = [highlightPlayer, contentUpdates, GEMessages [message]]
         
+
+hintForm :: Text -> FormInput App App (Int,Text)
+hintForm hintField = (,) <$> ireq intField playerField
+                         <*> ireq textField hintField
+
 postColorHintR :: Handler RepJson
 postColorHintR = do
-  (p,ctext) <- runInputPost iform
+  (p,ctext) <- runInputPost $ hintForm colorField
   case readMay $ unpack ctext of
     Just c  -> hintHandler p $ Left c
-    Nothing -> 
-      jsonToRepJson $ object $ [(errorField,
-        toJSONT "Invalid hint input.  Please try refreshing your page")] -- XXX
-  where
-    iform :: FormInput App App (Int,Text)
-    iform = (,) <$> ireq intField playerField
-                <*> ireq textField colorField
+    Nothing -> jsonToRepJson $ GEError
+        "Invalid hint input.  Please try refreshing your page" -- XXX
 
 postRankHintR :: Handler RepJson
 postRankHintR = do
-  (p,ctext) <- runInputPost iform
-  $(logDebug) $ ctext
+  (p,ctext) <- runInputPost $ hintForm rankField
   case readMay $ unpack ctext of
     Just r  -> hintHandler p $ Right r
-    Nothing -> 
-      jsonToRepJson $ object $ [(errorField,
-        toJSONT "Invalid hint input.  Please try refreshing your page")] -- XXX
-  where
-    iform :: FormInput App App (Int,Text)
-    iform = (,) <$> ireq intField playerField
-                <*> ireq textField rankField
+    Nothing -> jsonToRepJson $ GEError
+       "Invalid hint input.  Please try refreshing your page" -- XXX
 
 -- XXX these can be better cleaned up and combined
 postActionHandler :: Show a => FormInput App App a  -- XXX show
                   -> (a -> Game -> Either String (Game,b))
-                  -> (Game -> Int -> b -> Handler (Maybe Text -> [(Text,Value)]))
+                  -> (Game -> Int -> b -> Handler (Maybe Text -> [GameEvent]))
                              -- int is current player
                   -> Handler RepJson
 postActionHandler inputform attemptaction handleresult = do
@@ -632,15 +616,14 @@ postActionHandler inputform attemptaction handleresult = do
                               return $ (g,Right (currentP,b)))
   messages <- 
     case result of 
-      Left err -> return $ const [(errorField,toJSONT err)]
+      Left err -> return $ const [GEError err]
       Right (cp,b)  -> handleresult g cp b
   let otherPlayers :: [Text]
       otherPlayers = map playerChanId $
          filter ((/= nm) . playerName) $ gamePlayers g
   playerChans <- getChannels otherPlayers
-  mapM_ (flip sendMessage $ object (messages $ Just nm)) playerChans
-  jsonToRepJson $ object $ messages Nothing
-        
+  mapM_ (flip sendMessage $ messages $ Just nm) playerChans
+  jsonToRepJson $ messages Nothing
 
 postDiscardR :: Handler RepJson
 postDiscardR = 
@@ -655,7 +638,7 @@ postDiscardR =
         Right (g',oldcard,newcard) -> Right (g',(card,oldcard,newcard))
 
     handleResult :: Game -> Int -> (Int,Card,Maybe Card) 
-                 -> Handler (Maybe Text -> [(Text,Value)])
+                 -> Handler (Maybe Text -> [GameEvent])
     handleResult g currentP (oldcardi,oldcard,newcard) = do
       routeRenderer <- getUrlRender
       renderParams  <- getUrlRenderParams
@@ -682,36 +665,34 @@ postDiscardR =
         color :: Color
         color = cardColor oldcard
 
-        highlightPlayer :: (Text,Value)
+        highlightPlayer :: GameEvent
         highlightPlayer = case gameStatus g of
-                            Running {currentP=newCP} -> 
-                                 (highlightplayerField,toJSON $ newCP)
-                            _ -> (highlightplayerField,toJSON $ (-1 :: Int))
+                            Running {currentP=newCP} -> GEHighlightPlayer newCP
+                            _ -> GEUnhighlightPlayer
 
         newDiscardTable :: Text
         newDiscardTable = render $ discardTable color (getDiscards g color)
 
-        replaceContent = (replacecontentField, toJSON $ map object $
-          [ [(replaceidField,toJSON $ discardTableId (cardColor oldcard))
-            ,(replacedataField, toJSON newDiscardTable)]
-           ,[(replaceidField,toJSONT "hintstd")
-            ,(replacedataField, toJSON $ render $ hintsTdContent $ gameHints g)]
-           ,[(replaceidField,toJSONT "decksizetd")
-            ,(replacedataField, toJSONT $ render $ deckTdContent $ length $ gameDeck g)]
-          ])
+        replaceContent :: GameEvent
+        replaceContent = GEReplaceContent [
+            ContentUpdate (discardTableId (cardColor oldcard)) newDiscardTable
+           ,ContentUpdate "hintstd" 
+                          (render $ hintsTdContent $ gameHints g)
+           ,ContentUpdate "decksizetd" 
+                          (render $ deckTdContent $ length $ gameDeck g)
+          ]
+
       return (\me ->
         [highlightPlayer
-        ,(discardField,object $
-              [(playerField,toJSON currentP)
-              ,(cardField,toJSON (oldcardi))]
-           ++ maybe [] (\r -> [(newcardField, toJSONT r)]) (newcardRoute me))
-        ,(messagesField,toJSON [message me])
+        ,GEDiscard {geDiscPlayer = currentP, geDiscCard = oldcardi,
+                    geDiscNewCard = newcardRoute me}
+        ,GEMessages [message me]
         ,replaceContent])
   in
     postActionHandler inputForm attemptAction handleResult
 
 postPlayR :: Handler RepJson
-postPlayR = 
+postPlayR =
   let
     inputForm :: FormInput App App Int
     inputForm = ireq intField cardField
@@ -724,7 +705,7 @@ postPlayR =
         Right (g',success,oldcard,newcard) -> Right (g',(card,success,oldcard,newcard))
 
     handleResult :: Game -> Int -> (Int,Bool,Card,Maybe Card) 
-                 -> Handler (Maybe Text -> [(Text,Value)])
+                 -> Handler (Maybe Text -> [GameEvent])
     handleResult g currentP (oldcardi,success,oldcard,newcard) = do
       routeRenderer <- getUrlRender
       renderParams  <- getUrlRenderParams
@@ -762,37 +743,25 @@ postPlayR =
         newDiscardTable :: Text
         newDiscardTable = render $ discardTable color (getDiscards g color)
 
-        highlightPlayer :: (Text,Value)
+        highlightPlayer :: GameEvent
         highlightPlayer = case gameStatus g of
-                            Running {currentP=newCP} -> 
-                                 (highlightplayerField,toJSON $ newCP)
-                            _ -> (highlightplayerField,toJSON $ (-1 :: Int))
+                            Running {currentP=newCP} -> GEHighlightPlayer newCP
+                            _ -> GEUnhighlightPlayer
 
-        replaceContent = (replacecontentField, toJSON $ map object $
-            (if success
-              then [(replaceidField,toJSON $ boardCellId color)
-                    ,(replacedataField, toJSON newBoardCell)]
-              else [(replaceidField,toJSON $ discardTableId color)
-                    ,(replacedataField, toJSON newDiscardTable)])
-                   
-          : [[(replaceidField,toJSONT "hintstd")
-             ,(replacedataField,
-               toJSONT $ render $ hintsTdContent $ gameHints g)]
-            ,[(replaceidField,toJSONT "decksizetd")
-             ,(replacedataField,
-               toJSONT $ render $ hintsTdContent $ length $ gameDeck g)]
-            ,[(replaceidField,toJSONT "strikestd")
-             ,(replacedataField,
-               toJSONT $ render $ strikesTdContent $ gameStrikes g)]
-              ])
+        replaceContent = GEReplaceContent [
+           if success
+              then ContentUpdate (boardCellId color) newBoardCell
+              else ContentUpdate (discardTableId color) newDiscardTable
+          ,ContentUpdate "hintstd" (render $ hintsTdContent $ gameHints g)
+          ,ContentUpdate "decksizetd" (render $ hintsTdContent $ length $ gameDeck g)
+          ,ContentUpdate "strikestd" (render $ strikesTdContent $ gameStrikes g)
+          ]
 
       return (\me ->
         [highlightPlayer
-        ,(playField,object $
-              [(playerField,toJSON currentP)
-              ,(cardField,toJSON (oldcardi))]
-           ++ maybe [] (\r -> [(newcardField, toJSONT r)]) (newcardRoute me))
-        ,(messagesField,toJSON [message me])
+        ,GEPlay {gePlayPlayer = currentP, gePlayCard = oldcardi,
+                 gePlayNewCard = newcardRoute me}
+        ,GEMessages [message me]
         ,replaceContent])
   in
     postActionHandler inputForm attemptAction handleResult

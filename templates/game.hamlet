@@ -61,6 +61,11 @@
     
 
 <div id="chat" class="curvy">
+  <div id="chatdisplay">
+  <form name="chatform" 
+        onsubmit="sendMessage(this.chatinput.value); return false"
+        action="">
+    <input id="chatinput" type=text name="chatinput" placeholder="Enter Message">
 
 <div id="playerCards">
   $forall (pn,p) <- players

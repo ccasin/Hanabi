@@ -3,7 +3,7 @@ module Handler.Hanabi
   ,postCreateHanabiR,postJoinHanabiR,postUnjoinHanabiR
   ,getGameEventReceiveR,getPlayerEventReceiveR
   ,getDumpTablesR  -- XXX
-  ,postColorHintR,postRankHintR,postDiscardR,postPlayR)
+  ,postColorHintR,postRankHintR,postDiscardR,postPlayR,postChatR)
    
 
 where
@@ -55,14 +55,11 @@ import Handler.Infrastructure
 ---- - xxx start game button should only show for leader
 ---- - xxx actions should go away after turn
 ---- - xxx what to do if channel lookup fails
-
-
------ - XXX maybes do null, not just disappear in the js - rething play/discard
------ - XXX errors go to all players right now
+---- - XXX errors go to all players right now
+---- - XXX more sophisticated white space in chat
 
 toJSONT :: Text -> Value
 toJSONT = toJSON
-
 
 
 ---------------------------------------
@@ -463,6 +460,7 @@ getPlayerEventReceiveR uid = do
   res <- lift $ eventSourceAppChan chan req
   sendWaiResponse res
 
+
 ---------------------------------------
 ----- Game event handlers (AJAX) ------
 
@@ -489,6 +487,21 @@ data GameEvent = GEHighlightPlayer Int
                | GEReplaceCards {geReplPlayer :: Int,
                                  geReplCards  :: [Text]}
 $(deriveJSON (drop 6) ''GameEvent)
+
+postChatR :: Handler RepJson
+postChatR = do
+  msg <- runInputPost $ ireq textField "content"
+  nm  <- requireName
+  g   <- requireGame
+  let otherPlayers :: [Text]
+      otherPlayers = map playerChanId $
+         filter ((/= nm) . playerName) $ gamePlayers g
+
+      message=T.concat ["<b>&lt;",nm,"&gt;</b> ",msg]
+  playerChans <- getChannels otherPlayers
+  mapM_ (flip sendMessage $ [GEMessages [message]]) playerChans
+  jsonToRepJson $ [GEMessages [message]]
+
 
 -- XXX check for game end
 hintHandler :: Int -> Either Color Rank -> Handler RepJson

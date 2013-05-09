@@ -52,7 +52,20 @@ function getCard (player,col) {
 }
 
 function displayMessage (msg) {
-  return; // XXX
+  var msgp = $('<p>').addClass("nobottommargin").html(msg);
+  var disp = $("#chatdisplay");
+  disp.append(msgp);
+  disp.prop("scrollTop",disp.prop("scrollHeight"));
+}
+
+function sendMessage (msg) {
+  if (msg != "") {
+     $("#chatinput").val("");
+     $.post("@{ChatR}",{content:msg},
+            function (data,s,j) {
+              handleEvents (data);
+            });
+  }
 }
 
 function sendPlayDiscard (dest,n) {
@@ -157,7 +170,7 @@ function handleEvents (events) {
   
     if ("GEDiscard" in event) {
       var dc = event.GEDiscard;
-      if ("NewCard" in dc) {
+      if (dc.NewCard != null) {
         removeCardAddCard(dc.Player, dc.Card, dc.NewCard);
       } else {
         removeCard(dc.Player, dc.Card);
@@ -166,7 +179,7 @@ function handleEvents (events) {
   
     if ("GEPlay" in event) {
       var p = event.GEPlay;
-      if ("NewCard" in p) {
+      if (p.NewCard != null) {
         removeCardAddCard(p.Player, p.Card, p.NewCard);
       } else {
         removeCard(p.Player, p.Card);

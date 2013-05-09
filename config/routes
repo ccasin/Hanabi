@@ -25,3 +25,5 @@
 /play PlayR POST
 /colorhint ColorHintR POST
 /rankhint RankHintR POST
+
+/chat ChatR POST

@@ -1,5 +1,11 @@
+/* multi use stuff */
+
 .clickable {
   cursor: pointer;
+}
+
+.nobottommargin {
+  margin-bottom: 0px;
 }
 
 div.curvy {
@@ -9,6 +15,9 @@ div.curvy {
   margin: 10px;
   padding: 5px;
 }
+
+/*****************************/
+/**** The high-level divs ****/
 
 #board {
   position:absolute;
@@ -39,11 +48,6 @@ div.curvy {
   height:200px;
   margin-left:384px;
   margin-top:184px;
-
-}
-
-.nobottommargin {
-  margin-bottom: 0px;
 }
 
 #playerCards {
@@ -51,29 +55,15 @@ div.curvy {
   margin-top: 398px;
 }
 
-div.topAction {
-  position: absolute;
-  margin-top:0px;
-  width:115px;
-  padding-left:20px;
-}
 
-#playAction {
-  margin-left:0;
-}
-
-#discardAction {
-  margin-left:33%;
-}
-
-#hintAction {
-  margin-left:66%;
-}
-
+/*************************/
+/**** The actions div ****/
 button.actionButton {
   width:75px;
 }
 
+/**************************/
+/**** The discards div ****/
 table.discardtable {
   width:100%;
   height:132px;
@@ -83,10 +73,26 @@ td.discardtable {
   width:18%;
 }
 
+tr.discardtable {
+  height:100%;
+}
+
+tr.discardrow {
+  height:16%;
+}
+
 td.discardspace {
   width:2%;
 }
 
+td.discardimage {
+  text-align: center;
+  width:100%;
+  height:20%;
+}
+
+/***********************/
+/**** The board div ****/
 table.boardtable {
   width:100%;
 }
@@ -103,20 +109,8 @@ td.boardspace {
   width:2%;
 }
 
-td.discardimage {
-  text-align: center;
-  width:100%;
-  height:20%;
-}
-
-tr.discardtable {
-  height:100%;
-}
-
-tr.discardrow {
-  height:16%;
-}
-
+/*************************/
+/**** The player divs ****/
 tr.knowledgerow {
   height:20px;
 }
@@ -124,4 +118,16 @@ tr.knowledgerow {
 td.knowledgecell {
   height:20px;
   text-align:center;
+}
+
+/**********************/
+/**** The chat div ****/
+#chatdisplay {
+  height:172px;
+  text-align:left;
+  overflow:auto;
+}
+
+#chatinput {
+  width:540px;
 }

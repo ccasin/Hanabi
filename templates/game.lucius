@@ -124,6 +124,12 @@ td.cardrow {
   padding-right:4px;
 }
 
+div.playerdiv {
+  position:absolute;
+  width:400px;
+  height:175px;
+}
+
 /**********************/
 /**** The chat div ****/
 #chatdisplay {

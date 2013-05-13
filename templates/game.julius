@@ -167,6 +167,12 @@ function handleEvents (events) {
         }
       }
     }
+
+    if ("GEUnhighlightPlayer" in event) {
+      for (var i=0; i < #{toJSON (length players)}; i++) {
+        $("#player"+i).css("border-color","black");
+      }
+    }
   
     if ("GEDiscard" in event) {
       var dc = event.GEDiscard;

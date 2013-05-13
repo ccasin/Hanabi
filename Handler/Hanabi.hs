@@ -10,7 +10,7 @@ where
 
 import Import
 
-import Data.Maybe (isJust,fromMaybe)
+import Data.Maybe (isNothing, isJust,fromMaybe)
 import Data.Text (pack,unpack,append)
 import qualified Data.Text as T (concat)
 
@@ -95,6 +95,9 @@ dispColorKnowledge = dispKnowledge htmlColor
 dispRankKnowledge :: Fact Rank -> HtmlUrl (Route App)
 dispRankKnowledge = dispKnowledge htmlRank
 
+describeCard :: Card -> HtmlUrl (Route App)
+describeCard (Card {cardColor,cardRank})
+  = [hamlet|#{describe cardRank}^{htmlColor cardColor}|]
 
 ----------------------------------------------------------
 ---- Small bits of HTML for various parts of the page ----
@@ -300,14 +303,16 @@ knowledgeRow ids disp ks = [hamlet|
     numberedKs = zip [1..] ks
 
 -- Constructs the TD showing a player's own card
-playerSecretCardTd :: Knowledge -> HtmlUrl (Route App)
-playerSecretCardTd k = [hamlet|
-    <td class="cardrow">
-      <img src=@{StaticR $ knowledgeToRoute k}>
-  |]
+secretCardImg :: Knowledge -> HtmlUrl (Route App)
+secretCardImg k = [hamlet|<img src=@{StaticR $ knowledgeToRoute k}> |]
 
 gameWidget :: Game -> Text -> Widget
-gameWidget game nm = $(widgetFile "game")
+gameWidget game nm = do $(widgetFile "game")
+                        case length $ gamePlayers game of
+                          2 -> addStylesheet $ StaticR css_2players_css
+                          3 -> addStylesheet $ StaticR css_3players_css
+                          4 -> addStylesheet $ StaticR css_4players_css
+                          _ -> addStylesheet $ StaticR css_5players_css
   where
     players,otherPlayers :: [(Int,Player)]
     players      = zip [0..] $ gamePlayers game
@@ -354,14 +359,14 @@ gameWidget game nm = $(widgetFile "game")
                        _ -> "black"
      in
        [whamlet|
-           <div id=#{append "player" numText} class="curvy" style="border-color: #{borderColor};">
+           <div id=#{append "player" numText} class="curvy playerdiv" style="border-color: #{borderColor};">
              <p>
                <b> #{succ pnum}. #{name}
              <table id=#{append numText "cards"}>
                <tr id=#{append numText cardRowID}>
                  $if nm == name
                    $forall k <- knowledge
-                      ^{playerSecretCardTd k}
+                     <td class="cardrow"> ^{secretCardImg k}
                  $else
                    $forall c <- map fst hand
                      <td class="cardrow"> <img src=@{StaticR $ cardToRoute c}>
@@ -557,7 +562,7 @@ hintHandler hintedPN e = do
         hintedPlayerCardUpdates = 
           GEReplaceCards {geReplPlayer=hintedPN,
                           geReplCards=
-            map (render . playerSecretCardTd . snd) $ playerHand hintedP}
+            map (render . secretCardImg . snd) $ playerHand hintedP}
 
         contentUpdates :: GameEvent
         contentUpdates = GEReplaceContent $
@@ -669,11 +674,11 @@ postDiscardR =
 
         message :: Maybe Text -> Text
         message me = T.concat $
-             [fromMaybe "You" me," discarded a ",describeCard oldcard]
+             [fromMaybe "You" me," discarded a ",render $ describeCard oldcard]
           ++ case newcard of
                Nothing -> ["."]
                Just c  -> [" and drew a ",
-                           if isJust me then describeCard c else "new card",
+                           if isNothing me then render (describeCard c) else "new card",
                            "."]
 
         newcardRoute :: Maybe Text -> Maybe Text
@@ -737,13 +742,13 @@ postPlayR =
 
         message :: Maybe Text -> Text
         message me = T.concat $ (fromMaybe "You" me) :
-              if success 
-                 then [" played a ",describeCard oldcard]
-                 else [" tried to play a ",describeCard oldcard,", causing a strike, "]
+              (if success 
+                 then [" played a ",render $ describeCard oldcard]
+                 else [" tried to play a ",render (describeCard oldcard),", causing a strike, "])
            ++ case newcard of
                 Nothing -> ["."]
                 Just c  -> [" and drew a ",
-                            if isJust me then "new card" else describeCard c,
+                            if isNothing me then "new card" else render (describeCard c),
                             "."]
 
         newcardRoute :: Maybe Text -> Maybe Text

@@ -78,10 +78,6 @@ data Card  = Card {cardColor :: Color, cardRank :: Rank}
 derivePersistField "Card"
 $(deriveJSON (drop 4) ''Card)
 
-describeCard :: Card -> Text
-describeCard (Card {cardColor,cardRank})
-  = T.concat [describe cardColor," ",describe cardRank]
-
 data Fact a = Mystery | Isnt [a] | Is a
     deriving (Show,Read,Eq)
 $(deriveJSON id ''Fact)

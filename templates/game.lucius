@@ -120,6 +120,10 @@ td.knowledgecell {
   text-align:center;
 }
 
+td.cardrow {
+  padding-right:4px;
+}
+
 /**********************/
 /**** The chat div ****/
 #chatdisplay {

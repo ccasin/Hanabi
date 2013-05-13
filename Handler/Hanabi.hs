@@ -35,16 +35,13 @@ import Handler.Infrastructure
 ----  
 ---- TODO
 ----
----- - xxx can't change name while playing
+---- - BEFORE FIRST RELEASE
+----
 ---- - xxx dummy auth doesn't handle non-unique names right, and doens't restrict name length.
 ---- - xxx clean out dummy auths on startup? (timeout)
 ---- - xxx names with special characters are not handled correctly
 ----            are things being preescaped by form/db insertion and then it's messed up?
 ---- - xxx figure out when to delete channels
----- - xxx it would be "easy" for one player to listen to another player's events
----- - xxx you shouldn't be able to discard when you already have max hints
----- - xxx highlight current player
----- - xxx grey out non-selected player's actions
 ---- - xxx organize players better on screen
 ---- - xxx log errors
 ---- - xxx log actions
@@ -57,6 +54,11 @@ import Handler.Infrastructure
 ---- - xxx what to do if channel lookup fails
 ---- - XXX errors go to all players right now
 ---- - XXX more sophisticated white space in chat
+---- - xxx you shouldn't be able to discard when you already have max hints
+----
+---- - LATER:
+---- - xxx can't change name while playing
+---- - xxx it would be "easy" for one player to listen to another player's events
 
 toJSONT :: Text -> Value
 toJSONT = toJSON
@@ -66,7 +68,7 @@ toJSONT = toJSON
 ------- How to display knowledge ------
 
 htmlColor :: Color -> HtmlUrl (Route App)
-htmlColor c = [hamlet|#{show c}|]
+htmlColor c = [hamlet|<img src=@{StaticR (smallColorImage c)}>|]
 
 htmlRank :: Rank -> HtmlUrl (Route App)
 htmlRank r = [hamlet|#{describe r}|]
@@ -76,12 +78,16 @@ dispKnowledge :: Hintable a => (a -> HtmlUrl (Route App))
 dispKnowledge d (Is a)    = d a
 dispKnowledge _ Mystery   = [hamlet| |]
 dispKnowledge d (Isnt nots) =
-  if length nots > 2 then list (allHints \\ nots)
-                     else [hamlet|not ^{list nots}|]
+  if length nots > 2 then listYes (allHints \\ nots)
+                     else [hamlet|not ^{listNot nots}|]
   where
-    list []     = [hamlet| |]
-    list [a]    = d a
-    list (a:as) = [hamlet| ^{d a} or ^{list as} \|]
+    listNot []     = [hamlet| |]
+    listNot [a]    = d a
+    listNot (a:as) = [hamlet|^{d a} ^{listNot as}|]
+
+    listYes []     = [hamlet| |]
+    listYes [a]    = d a
+    listYes (a:as) = [hamlet| ^{d a} or ^{listYes as}|]
 
 dispColorKnowledge :: Fact Color -> HtmlUrl (Route App)
 dispColorKnowledge = dispKnowledge htmlColor
@@ -272,7 +278,7 @@ discardTable color discards =
     <table class="discardtable">
          <tr class="discardrow">
            <td colspan="2" class="discardimage">
-             <img src=@{StaticR (smallColorImage color)}>
+             ^{htmlColor color}
        $forall r <- [One,Two,Three,Four,Five]
          <tr class="discardrow">
            $maybe i <- lookup r discards
@@ -296,7 +302,7 @@ knowledgeRow ids disp ks = [hamlet|
 -- Constructs the TD showing a player's own card
 playerSecretCardTd :: Knowledge -> HtmlUrl (Route App)
 playerSecretCardTd k = [hamlet|
-    <td>
+    <td class="cardrow">
       <img src=@{StaticR $ knowledgeToRoute k}>
   |]
 
@@ -358,7 +364,7 @@ gameWidget game nm = $(widgetFile "game")
                       ^{playerSecretCardTd k}
                  $else
                    $forall c <- map fst hand
-                     <td> <img src=@{StaticR $ cardToRoute c}>
+                     <td class="cardrow"> <img src=@{StaticR $ cardToRoute c}>
                <tr id=#{colorHintID pnum} class="knowledgerow">
                  ^{knowledgeRow colorKIds dispColorKnowledge $ map knownColor knowledge}
                <tr id=#{rankHintID pnum} class="knowledgerow">
@@ -545,15 +551,13 @@ hintHandler hintedPN e = do
           Right _ -> dispRankKnowledge . knownRank
 
         dispFact :: Knowledge -> Text
-        dispFact k = pack $ renderHtml $ htmlFact k renderParams
+        dispFact = render . htmlFact
         
         hintedPlayerCardUpdates :: GameEvent
         hintedPlayerCardUpdates = 
           GEReplaceCards {geReplPlayer=hintedPN,
                           geReplCards=
-            map (\(_,k) -> pack $ renderHtml $
-                       playerSecretCardTd k renderParams)
-              $ playerHand hintedP}
+            map (render . playerSecretCardTd . snd) $ playerHand hintedP}
 
         contentUpdates :: GameEvent
         contentUpdates = GEReplaceContent $
@@ -572,9 +576,10 @@ hintHandler hintedPN e = do
                  (gamePlayers g)
 
         hintDesc :: Text
-        hintDesc = case e of
-                     Left c  -> append (describe c) " cards"
-                     Right r -> append (describe r) "s"
+        hintDesc = render $ 
+          case e of
+            Left c -> [hamlet|^{htmlColor c}s|]
+            Right r -> [hamlet|^{htmlRank r}s|]
 
         messageHinted,messageHinter,messageOther :: Text
         messageHinted = T.concat [nm, " gave you a hint about your ",

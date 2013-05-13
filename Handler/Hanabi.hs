@@ -362,7 +362,7 @@ gameWidget game nm = do $(widgetFile "game")
            <div id=#{append "player" numText} class="curvy playerdiv" style="border-color: #{borderColor};">
              <p>
                <b> #{succ pnum}. #{name}
-             <table id=#{append numText "cards"}>
+             <table id=#{append numText "cards"} class="cardtable">
                <tr id=#{append numText cardRowID}>
                  $if nm == name
                    $forall k <- knowledge

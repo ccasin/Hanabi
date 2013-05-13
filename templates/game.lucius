@@ -130,6 +130,11 @@ div.playerdiv {
   height:175px;
 }
 
+table.cardtable {
+  margin-left:auto;
+  margin-right:auto;
+}
+
 /**********************/
 /**** The chat div ****/
 #chatdisplay {

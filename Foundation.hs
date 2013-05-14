@@ -4,7 +4,8 @@ import Prelude
 import Yesod
 import Yesod.Static
 import Yesod.Auth
-import Yesod.Auth.GoogleEmail
+import qualified Yesod.Auth.GoogleEmail as GID
+import qualified Yesod.Auth.OpenId as OID
 import Yesod.Auth.Facebook.ServerSide
 import Facebook (Credentials (Credentials))
 import Yesod.Default.Config
@@ -182,8 +183,9 @@ instance YesodAuth App where
 --               p -> do fmap Just $ insert $ User p (credsIdent creds) ""
 
     -- You can add other plugins like BrowserID, email or OAuth here
-    authPlugins _ = [authGoogleEmail
+    authPlugins _ = [GID.authGoogleEmail
                     ,authFacebook (Credentials fbName fbId fbSecret) []
+                    ,OID.authOpenId OID.OPLocal []
                     ,authRandom]
 
     authHttpManager = httpManager

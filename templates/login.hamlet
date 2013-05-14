@@ -1,10 +1,16 @@
 <div #login-options>
   <h3>Login using
-  <form method="get" action="@{AuthR forwardUrl}">
-    <input type="hidden" name="openid_identifier" value="https://www.google.com/accounts/o8/id">
-    <input type="image" src="@{StaticR img_google_logo_png}" value="Login via Google">
-  <a href="@{AuthR facebookLogin}">
-     <img src="@{StaticR img_facebook_logo_png}" value="Login via Facebook">
+  <div .login>
+    <form method="get" action="@{AuthR GID.forwardUrl}">
+      <input type="hidden" name="openid_identifier" value="https://www.google.com/accounts/o8/id">
+      <input .loginimage type="image" src="@{StaticR img_google_logo_png}" value="Login via Google">
+  <div .login>
+    <form method="get" action="@{AuthR OID.forwardUrl}">
+      <input type="hidden" name="openid_identifier" value="http://me.yahoo.com">
+      <input .loginimage type="image" src="@{StaticR img_yahoo_logo_png}" value="Login via Yahoo!">
+  <div .login>
+    <a href="@{AuthR facebookLogin}">
+       <img .loginimage src="@{StaticR img_facebook_logo_png}" value="Login via Facebook">
   <p>Logging in with one of these services allows you to reserve a #
     username and track your Hanabi stats over time.  However, you may
     also <form method="post" action="@{dummyUrl}"> 

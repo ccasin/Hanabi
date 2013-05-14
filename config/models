@@ -2,7 +2,6 @@ User
   credSource  Text
   credID      Text
   name        Text
-  UniqueName  name
   UniqueCreds credSource credID
 
 Game

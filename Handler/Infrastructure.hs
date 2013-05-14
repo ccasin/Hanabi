@@ -150,7 +150,7 @@ getSetNameR =
   do Entity _ user <- requireAuth
      (widget,enctype) <- generateFormPost nameForm
      defaultLayout [whamlet|
-       <p>Welcome to Hanabi #{userCredID user}.
+       <p>Welcome to Hanabi.
 
        <p>Please chose a nickname.  This will be visible to other players.
                  
@@ -169,7 +169,7 @@ postSetNameR =
        FormSuccess nmUnsanitized -> do
          let nm = strip nmUnsanitized
          nmResult <- if T.length nm < 1 then return NameInvalid else runDB $ do 
-           taken <- liftM isJust $ getBy $ UniqueName nm
+           taken <- liftM (not . null) $ selectList [UserName ==. nm] []
            unless taken $ update uid [UserName =. nm]
            return $ if taken then NameTaken else NameSuccess
          case nmResult of

@@ -150,13 +150,14 @@ getSetNameR =
   do Entity _ user <- requireAuth
      (widget,enctype) <- generateFormPost nameForm
      defaultLayout [whamlet|
-       <p>Welcome to Hanabi.
-
-       <p>Please chose a nickname.  This will be visible to other players.
-                 
-       <form method=post action=@{SetNameR} enctype=#{enctype}>
-          ^{widget}
-          <input type=submit value="Set nickname">
+       <div style="width:490px;padding:5px;margin:auto;border:1px solid black;">
+         <p>Welcome to Hanabi.
+  
+         <p>Please chose a nickname.  This will be visible to other players.
+                   
+         <form method=post action=@{SetNameR} enctype=#{enctype}>
+            ^{widget}
+            <input type=submit value="Set nickname">
      |]
 
 data NameResult = NameSuccess | NameTaken | NameInvalid

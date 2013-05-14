@@ -1,5 +1,6 @@
 <div #login-options>
-  <h3>Login using
+  <h2>Online Hanabi
+  <h3>Login
   <div .login>
     <form method="get" action="@{AuthR GID.forwardUrl}">
       <input type="hidden" name="openid_identifier" value="https://www.google.com/accounts/o8/id">

@@ -5,7 +5,8 @@ import Yesod
 import Yesod.Static
 import Yesod.Auth
 import Yesod.Auth.GoogleEmail
-import Yesod.Auth.Dummy
+import Yesod.Auth.Facebook.ServerSide
+import Facebook (Credentials (Credentials))
 import Yesod.Default.Config
 import Yesod.Default.Util (addStaticContentExternal)
 import Network.HTTP.Conduit (Manager)
@@ -13,6 +14,10 @@ import qualified Settings
 import Settings.Development (development)
 import qualified Database.Persist.Store
 import Settings.StaticFiles
+
+import Settings.Facebook (fbName, fbId, fbSecret)
+-- Note: this file is missing from the repo intentionally - it contains a private key
+
 import Database.Persist.GenericSql
 import Settings (widgetFile, Extra (..))
 import Model
@@ -133,6 +138,30 @@ instance YesodPersist App where
             f
             (connPool master)
 
+authRandom :: AuthPlugin App
+authRandom = AuthPlugin "random" dispatch login
+  where
+    dispatch :: Text -> [Text] -> GHandler Auth App ()
+    dispatch "POST" [] = do
+      uid <- liftIO $ liftM (pack.show) $ randomRIO (1 :: Int,1000000000)
+      taken <- runDB $ getBy $ UniqueCreds "random" uid
+      case taken of
+        Just _  -> dispatch "POST" []
+        Nothing -> setCreds True $ Creds "random" uid []
+    dispatch _ _ = notFound
+
+    loginUrl = PluginR "random" []
+    login authToMaster = toWidget [hamlet|
+        <form method="post" action="@{authToMaster loginUrl}">
+           <input type="submit" value="Play without logging in">
+      |]
+    
+
+loginPage :: GWidget s App ()
+loginPage = $(widgetFile "login")
+  where
+    dummyUrl = AuthR $ PluginR "random" []
+
 instance YesodAuth App where
     type AuthId App = UserId
 
@@ -145,17 +174,21 @@ instance YesodAuth App where
         x <- getBy $ UniqueCreds (credsPlugin creds) (credsIdent creds)
         case x of
           Just (Entity uid _) -> return $ Just uid
-          Nothing -> 
-             case credsPlugin creds of
-               "dummy" -> do uniqueid <- liftIO $ liftM (pack . show) 
-                                                $ randomRIO (1 :: Int,1000000000)
-                             fmap Just $ insert $ User "dummy" uniqueid (credsIdent creds)
-               p -> do fmap Just $ insert $ User p (credsIdent creds) ""
+          Nothing -> fmap Just $ insert $ User (credsPlugin creds) (credsIdent creds) ""
+--             case credsPlugin creds of
+--               "dummy" -> do uniqueid <- liftIO $ liftM (pack . show) 
+--                                                $ randomRIO (1 :: Int,1000000000)
+--                             fmap Just $ insert $ User "dummy" uniqueid (credsIdent creds)
+--               p -> do fmap Just $ insert $ User p (credsIdent creds) ""
 
     -- You can add other plugins like BrowserID, email or OAuth here
-    authPlugins _ = [authGoogleEmail, authDummy]
+    authPlugins _ = [authGoogleEmail
+                    ,authFacebook (Credentials fbName fbId fbSecret) []
+                    ,authRandom]
 
     authHttpManager = httpManager
+
+    loginHandler = defaultLayout $ [whamlet|^{loginPage}|]
 
 -- This instance is required to use forms. You can modify renderMessage to
 -- achieve customized and internationalized form validation messages.

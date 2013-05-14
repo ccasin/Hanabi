@@ -1,4 +1,12 @@
-module Handler.Infrastructure where
+module Handler.Infrastructure
+  (cardField, playerField, colorField, rankField,
+   cardRowID, colorRowID, rankRowID,
+   colorHintID, rankHintID,
+   getChannel, getChannels, newChannel, deleteChannel, sendMessage,
+   sgameid, requireName, requireGame, requireGameTransaction,
+   getSetNameR, postSetNameR,
+   GameListEvent(..), GameListMsg(..), PlayerListEvent(..), PlayerListMsg(..))   
+where
 
 import Data.IORef
 import Data.Text (pack,append,strip)
@@ -23,33 +31,11 @@ import Import
 
 -- object fields
 
-cardField, messagesField, errorField, newcardField, playerField :: Text
-discardField, playField, colorField, rankField :: Text
-replacecontentField, replaceidField, replacedataField  :: Text
-replaceCardsField, cardsField, highlightplayerField :: Text
+cardField, playerField, colorField, rankField :: Text
 cardField        = "card"           -- Int
 playerField      = "player"    -- Int
-
-discardField     = "discard"        -- object (cardField,playerField,newcardfield (opt))
-playField        = "play"           -- object (cardField,playerField,newcardfield (opt))
-
 colorField       = "color"
 rankField        = "rank"
-
-messagesField    = "msgs"            -- [String]
-errorField       = "error"          -- String
-
-newcardField     = "newcard"        -- Route
-
-replacecontentField = "replacecontent" -- object (replaceid,replacedata)
-                                       -- an id, and the content
-replaceidField = "replaceid"
-replacedataField = "replacedata"
-
-replaceCardsField = "replacecards"     -- object (playerField,cardsField)
-cardsField        = "cards"            -- [html]
-highlightplayerField = "highlightplayer" -- int
-
 
 -- css ids
 cardRowID, colorRowID, rankRowID :: Text
@@ -98,8 +84,8 @@ newChannel =
          liftIO $ modifyIORef iochans ((uniqueid,newc):)
          return uniqueid
 
-deleteChan :: Text -> Handler ()
-deleteChan nm =
+deleteChannel :: Text -> Handler ()
+deleteChannel nm =
   do iochans <- liftM gameChannels getYesod
      liftIO $ modifyIORef iochans $
        foldl' (\cs (nm',c) -> if nm == nm' then cs else (nm',c):cs)
@@ -164,8 +150,7 @@ getSetNameR =
   do Entity _ user <- requireAuth
      (widget,enctype) <- generateFormPost nameForm
      defaultLayout [whamlet|
-       <p>Welcome to Hanabi <b>#{userCredID user}</b>.
-            
+       <p>Welcome to Hanabi #{userCredID user}.
 
        <p>Please chose a nickname.  This will be visible to other players.
                  

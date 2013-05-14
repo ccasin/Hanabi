@@ -1,0 +1,13 @@
+<div #login-options>
+  <h3>Login using
+  <form method="get" action="@{AuthR forwardUrl}">
+    <input type="hidden" name="openid_identifier" value="https://www.google.com/accounts/o8/id">
+    <input type="image" src="@{StaticR img_google_logo_png}" value="Login via Google">
+  <a href="@{AuthR facebookLogin}">
+     <img src="@{StaticR img_facebook_logo_png}" value="Login via Facebook">
+  <p>Logging in with one of these services allows you to reserve a #
+    username and track your Hanabi stats over time.  However, you may
+    also <form method="post" action="@{dummyUrl}"> 
+           <input type="submit" value="play without logging in.">
+  
+

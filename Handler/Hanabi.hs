@@ -226,15 +226,15 @@ postJoinHanabiR guid = do
     JFailGameGone -> -- XXX use somethign better than setmessage
       do setMessage 
            "Sorry, that game was cancelled by its creator.  Please pick another."
-         deleteChan pchan
+         deleteChannel pchan
          redirect HanabiLobbyR
     JFailGameStarted ->
       do setMessage "Sorry, that game just started.  Please pick another."
-         deleteChan pchan
+         deleteChannel pchan
          redirect HanabiLobbyR
     JFailGameFull ->
       do setMessage "Sorry, that game just filled up.  Please pick another."
-         deleteChan pchan
+         deleteChannel pchan
          redirect HanabiLobbyR
 
 
@@ -535,7 +535,7 @@ hintHandler hintedPN e = do
               do replace gid game'
                  return (game',Right (hplayer,highlightedCards)))
   case result of
-    Left err            -> jsonToRepJson $ object [(errorField,err)]
+    Left err            -> jsonToRepJson [GEError $ pack err]
     Right (hintedP,hintedCards) -> do 
        otherPlayerChans <- getChannels otherPlayers
        hintedPlayerChan <- getChannel $ playerChanId hintedP

@@ -2,7 +2,7 @@ Default: &defaults
   host: "*4" # any IPv4 host
   port: 3000
   approot: "http://localhost:3000"
-  #approot: "http://158.130.105.182:3000"
+  #approot: "http://158.130.106.147:3000"
   #copyright: Bogus
   #analytics: UA-YOURCODE
 
@@ -16,5 +16,6 @@ Staging:
   <<: *defaults
 
 Production:
-  approot: "http://localhost:3000"
+  approot: "http://158.130.106.147:3000"
+  #approot: "http://localhost:3000"
   <<: *defaults

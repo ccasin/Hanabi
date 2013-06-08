@@ -41,7 +41,6 @@ import Handler.Infrastructure
 ----            are things being preescaped by form/db insertion and then it's messed up?
 ---- - xxx figure out when to delete channels
 ---- - xxx log errors
----- - xxx log actions
 ---- - xxx end game doesn't happen
 ---- - xxx hint chooser is horrible
 ---- - xxx highlight selected hints in red
@@ -427,7 +426,7 @@ playerListWidget nm game =
                <form method=get action=@{StartHanabiR}>
                    <input type=submit value="Start the game">
            $else
-             <td id=#{startButton} class="hidden">
+             <td id=#{startButton} style="display:none;">
                <form method=get action=@{StartHanabiR}>
                    <input type=submit value="Start the game">
            <td>
@@ -452,7 +451,7 @@ playerListWidget nm game =
             mbox.innerHTML = event.Player + " left the game.";
             if (etype.PLELeave.NewLeader == name) {
                mbox.innerHTML += "  You are now the leader";
-               $(startButton).fadeIn(400,function() {$(startButton).removeClass();});
+               $(startButton).fadeIn('slow');
             }
           } else if ("PLEStart" in etype) {
             location.reload(true);
@@ -657,8 +656,7 @@ hintHandler hintedPN e = do
 
         otherPlayers :: [(Int,Text)]
         otherPlayers = map (\p -> (playerNum p,playerChanId p)) $
-          filter (\p -> (playerName p /= nm) && (playerName p /= playerName hintedP))
-                 (gamePlayers g)
+          filter (\p -> (playerName p /= nm)) (gamePlayers g)
 
         actions :: Int -> [GameEvent]
         actions pnum =
@@ -837,7 +835,7 @@ postPlayR =
               then ContentUpdate (boardCellId color) newBoardCell
               else ContentUpdate (discardTableId color) newDiscardTable
           ,ContentUpdate "hintstd" (render $ hintsTdContent $ gameHints g)
-          ,ContentUpdate "decksizetd" (render $ hintsTdContent $ length $ gameDeck g)
+          ,ContentUpdate "decksizetd" (render $ deckTdContent $ length $ gameDeck g)
           ,ContentUpdate "strikestd" (render $ strikesTdContent $ gameStrikes g)
           ]
 

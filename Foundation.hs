@@ -17,7 +17,9 @@ import qualified Database.Persist.Store
 import Settings.StaticFiles
 
 import Settings.Facebook (fbName, fbId, fbSecret)
--- Note: this file is missing from the repo intentionally - it contains a private key
+-- Note: this file is missing from the repo intentionally - it contains a private key.
+-- Just fill in these things with any old Text values to make the app build w/o 
+-- Facebook authentication
 
 import Database.Persist.GenericSql
 import Settings (widgetFile, Extra (..))

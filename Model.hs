@@ -1,9 +1,9 @@
-  module Model where
+module Model where
 
 import Prelude
 import Yesod
 import Data.Text (Text,pack,unpack,append,intercalate)
-import qualified Data.Text as T (concat)
+
 import Safe (readMay)
 
 import Database.Persist.Quasi
@@ -101,6 +101,7 @@ derivePersistField "Knowledge"
 $(deriveJSON (drop 5) ''Knowledge)
 
 data Player = Player {playerName   :: Text,
+                      playerNum    :: Int,
                       playerHand   :: [(Card,Knowledge)],
                       playerChanId :: Text}
   deriving (Show,Read,Eq)
@@ -128,6 +129,25 @@ data Discards = Discards [(Color,[(Rank,Int)])]
   deriving (Show,Read)
 derivePersistField "Discards"
 
+-- This stores a little more information than is really necessary to recreate the
+-- actions.  It's just convenient for generating text descriptions of what happened
+-- without reimplementing the actions themselves.
+data ActionLog = ALPlay {alPlayPlayer  :: Int,
+                         alPlayCard    :: Card,
+                         alPlayCardPos :: Int,
+                         alPlaySuccess :: Bool,
+                         alPlayNewCard :: Maybe Card}
+               | ALDisc {alDiscPlayer  :: Int,
+                         alDiscCard    :: Card,
+                         alDiscCardPos :: Int,
+                         alDiscNewCard :: Maybe Card}
+               | ALHint {alHintHinter  :: Int,
+                         alHintHinted  :: Int,
+                         alHintType    :: Either Color Rank}
+  deriving (Show,Read)
+derivePersistField "ActionLog"
+$(deriveJSON (drop 4) ''ActionLog)
+
 share [mkPersist sqlOnlySettings, mkMigrate "migrateAll"]
     $(persistFileWith lowerCaseSettings "config/models")
 
@@ -135,8 +155,6 @@ getDiscards :: Game -> Color -> [(Rank,Int)]
 getDiscards (Game {gameDiscards=Discards d}) c = 
   fromMaybe [] (lookup c d)
   {- fmap (sortBy (\a b -> compare (fst a) (fst b))) $ -}
-
-
 
 ----------------
 --- Hanabi Logic
@@ -234,11 +252,14 @@ discard gm cnum =
              (\p -> do ((c,_),cs) <- removeNth (playerHand p) cnum
                        return (c,p {playerHand=cs}))
          let discards = addDiscard (gameDiscards gm) oldcard
-             hints = 1 + gameHints gm 
+             hints = 1 + gameHints gm
          (game,newcard) <- drawCard (gm {gamePlayers=players,
                                          gameDiscards=discards,
                                          gameHints=hints})
-         return (game,oldcard,newcard)
+         let alog = ALDisc {alDiscPlayer=cp,alDiscCard=oldcard,
+                            alDiscCardPos=cnum,alDiscNewCard=newcard}
+         return (game {gameActions=alog:(gameActions game)},
+                 oldcard,newcard)
     _ -> throwError "discard: called during non-running game"
 
 -- Int input is the position of the played card.
@@ -258,10 +279,14 @@ play gm cnum =
              strikes = (if success then id else (1+)) $ gameStrikes gm
              hints = (if success && (cardRank playedcard == Five)
                          then (+1) else id) $ gameHints gm
+             alog = ALPlay {alPlayPlayer=cp,alPlayCard=playedcard,
+                            alPlayCardPos=cnum,alPlaySuccess=success,
+                            alPlayNewCard=Nothing}
          if (strikes > maxStrikes || scoreBoard board == 25)
            then return (gm {gameStrikes=strikes,gameStatus=Done,
                             gameDiscards=discards,gameBoard=board,
-                            gamePlayers=players},
+                            gamePlayers=players,
+                            gameActions=alog:gameActions gm},
                         success,playedcard,Nothing)
            else do
              (game,newcard) <- drawCard (gm {gameStrikes=strikes,
@@ -269,7 +294,9 @@ play gm cnum =
                                              gamePlayers=players,
                                              gameHints=hints,
                                              gameBoard=board})
-             return (game,success,playedcard,newcard)
+             let alog' = alog {alPlayNewCard=newcard}
+             return (game {gameActions=alog':gameActions game},
+                     success,playedcard,newcard)
     _ -> throwError "play: called during non-running game"
   where
     nextRank :: Maybe Rank -> Rank -> Bool
@@ -302,12 +329,16 @@ hint :: MonadError String m => Game -> Int -> Either Color Rank
 hint gm hp hintinfo = 
   case (gameStatus gm, hints > 0) of
     (gs@Running {currentP = cp},True) ->
+       let alog = ALHint {alHintHinter=cp,alHintHinted=hp,
+                          alHintType=hintinfo}
+        in
        do when (cp == hp) $ throwError "hint: you can't give yourself a hint"
           (upCards,players) <-
               updatePlayer (gamePlayers gm) hp (return . updateP)
           return (gm {gameStatus=gs {currentP=nextPlayer gm cp}
                      ,gameHints = hints - 1
-                     ,gamePlayers=players},
+                     ,gamePlayers=players
+                     ,gameActions=alog:gameActions gm},
                   players !! hp,
                   upCards)
     (_,False) -> throwError "hint: no hints left"

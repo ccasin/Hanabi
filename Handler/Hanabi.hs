@@ -10,7 +10,7 @@ where
 
 import Import
 
-import Data.Maybe (isNothing, isJust,fromMaybe)
+import Data.Maybe (isNothing,fromMaybe)
 import Data.Text (pack,unpack,append)
 import qualified Data.Text as T (concat)
 
@@ -30,7 +30,6 @@ import Network.Wai.EventSource
 import Safe (readMay)
 
 import Handler.Infrastructure
-
 
 ----  
 ---- TODO
@@ -135,7 +134,7 @@ postCreateHanabiR = do
   nm     <- requireName
   guid   <- newChannel
   pchan  <- newChannel
-  let newPlayer = Player nm [] pchan
+  let newPlayer = Player nm 0 [] pchan
   _      <- runDB $ insert $ 
               Game { gameStatus   = NotStarted
                    , gameUid      = guid
@@ -145,7 +144,8 @@ postCreateHanabiR = do
                    , gameStrikes  = 0
                    , gameBoard    = Board []
                    , gameDiscards = Discards []
-                   , gameDeck     = [] }
+                   , gameDeck     = []
+                   , gameActions  = []}
   setSession sgameid guid
   lobbyChan <- liftM lobbyChannel getYesod
   sendMessage lobbyChan $ GameListMsg GLEAddGame guid [nm]
@@ -208,7 +208,8 @@ postJoinHanabiR guid = do
       Nothing -> return JFailGameGone
       Just (Entity gid (Game {gameStatus=NotStarted,gamePlayers})) ->
         if (length gamePlayers >= 5) then return JFailGameFull
-           else let newPlayers = gamePlayers ++ [Player nm [] pchan] in
+           else let newPlayers = gamePlayers 
+                              ++ [Player nm (length gamePlayers) [] pchan] in
                 do update gid [GamePlayers =. newPlayers]
                    return $ JSuccess newPlayers
       Just _ -> return JFailGameStarted
@@ -248,8 +249,10 @@ getStartHanabiR = do
       (_, False)  -> return StartNeedPlayers
       (True,True) -> do 
         (dealtPlayers,deck) <- 
-          liftIO $ do players <- shuffle $ gamePlayers game
-                      deal players
+          liftIO $ do 
+            players <- shuffle $ gamePlayers game
+            let players' = zipWith (\i p -> p {playerNum=i}) [0..] players
+            deal players'
              -- XXX I should really precompute some shuffles to avoid
              -- locking up the DB like this
         update gid [GameStatus  =. Running 0 Nothing,
@@ -497,6 +500,61 @@ data GameEvent = GEHighlightPlayer Int
                                  geReplCards  :: [Text]}
 $(deriveJSON (drop 6) ''GameEvent)
 
+
+-- This takes in the log of an action and the player to whom I'm going
+-- to describe the action.  It returns a description of the action.
+-- XXX do "describe last action" instead, to handle head
+descLastAction :: Maybe Int -> Game 
+               -> (HtmlUrl (Route App) -> Text) -> Text
+descLastAction msgp game render =
+  case gameActions game of
+    [] -> "Error: no actions taken"
+    (ALPlay {alPlayPlayer=p, alPlayCard=card,
+             alPlayNewCard=newcard, alPlaySuccess=success}:_) -> T.concat $
+         (fromMaybe "You" $ name p msgp)
+      :  (if success 
+            then [" played a ",render $ describeCard card]
+            else [" tried to play a ",render (describeCard card),
+                  ", causing a strike"])
+      ++ [describeDraw (isNothing $ name p msgp) newcard]
+    (ALDisc {alDiscPlayer=p, alDiscCard=card,
+            alDiscNewCard=newcard}:_) -> T.concat
+         [fromMaybe "You" (name p msgp),
+          " discarded a ", render $ describeCard card,
+          describeDraw (isNothing $ name p msgp) newcard]
+    (ALHint {alHintHinter=hinter,alHintHinted=hinted,
+             alHintType=htype}:_) ->
+        T.concat [nameHinter," gave ",nameHinted," a hint about ",
+                  proHinted,hintDesc]
+      where
+        nameHinter, nameHinted, proHinted :: Text
+        nameHinter = fromMaybe "You" $ name hinter msgp
+        nameHinted = fromMaybe "you" $ name hinted msgp
+        proHinted = case name hinted msgp of
+                      Nothing -> "your"
+                      Just _  -> "their"
+
+        hintDesc :: Text
+        hintDesc = render $ 
+          case htype of
+            Left c -> [hamlet|^{htmlColor c}s.|]
+            Right r -> [hamlet|^{htmlRank r}s.|]
+  where
+    -- Bool is "Am I the player whose turn it is"
+    describeDraw :: Bool -> Maybe Card -> Text
+    describeDraw _  Nothing  = "."
+    describeDraw me (Just c) =
+        T.concat [", and drew a ",
+          if me then "new card" else render (describeCard c),
+          "."]
+
+    -- The player you want the name of, and maybe your own number
+    name :: Int -> Maybe Int -> Maybe Text
+    name p me = if Just p == me then Nothing
+                  else Just $ playerName $ (gamePlayers game !! p)
+                    
+
+
 postChatR :: Handler RepJson
 postChatR = do
   msg <- runInputPost $ ireq textField "content"
@@ -531,16 +589,13 @@ hintHandler hintedPN e = do
             Left err               -> return (game,Left err)
             Right (game',hplayer,highlightedCards) -> 
               do replace gid game'
-                 return (game',Right (hplayer,highlightedCards)))
+                 return (game',Right (hplayer,highlightedCards,currentP)))
   case result of
     Left err            -> jsonToRepJson [GEError $ pack err]
-    Right (hintedP,hintedCards) -> do 
-       otherPlayerChans <- getChannels otherPlayers
-       hintedPlayerChan <- getChannel $ playerChanId hintedP
-       mapM_ (flip sendMessage $ actions messageOther) otherPlayerChans
-       sendMessage hintedPlayerChan
-                   (hintedPlayerCardUpdates : actions messageHinted)
-       jsonToRepJson $ actions messageHinter
+    Right (hintedP,hintedCards,cpnum) -> do 
+       otherPlayerChans <- getChannelsP $ otherPlayers
+       mapM_ (\(pix,pc) -> sendMessage pc $ actions pix) otherPlayerChans
+       jsonToRepJson $ actions cpnum
       where
         hintIdField :: Int -> Text
         hintIdField card = 
@@ -548,14 +603,11 @@ hintHandler hintedPN e = do
             Left _ -> colorHintID hintedPN
             Right _ -> rankHintID hintedPN) $ pack $ show card
         
-        htmlFact :: Knowledge -> HtmlUrl (Route App)
+        htmlFact :: Knowledge -> Text
         htmlFact = case e of
-          Left _ -> dispColorKnowledge . knownColor
-          Right _ -> dispRankKnowledge . knownRank
+          Left _ -> render . dispColorKnowledge . knownColor
+          Right _ -> render . dispRankKnowledge . knownRank
 
-        dispFact :: Knowledge -> Text
-        dispFact = render . htmlFact
-        
         hintedPlayerCardUpdates :: GameEvent
         hintedPlayerCardUpdates = 
           GEReplaceCards {geReplPlayer=hintedPN,
@@ -565,7 +617,7 @@ hintHandler hintedPN e = do
         contentUpdates :: GameEvent
         contentUpdates = GEReplaceContent $
              (ContentUpdate "hintstd" (render $ hintsTdContent $ gameHints g))
-           : map (\(cnum,(_,k)) -> ContentUpdate (hintIdField cnum) (dispFact k))
+           : map (\(cnum,(_,k)) -> ContentUpdate (hintIdField cnum) (htmlFact k))
                  (zip [1..] $ playerHand hintedP)
 
         highlightPlayer :: GameEvent
@@ -573,28 +625,18 @@ hintHandler hintedPN e = do
                             Running {currentP=newCP} -> GEHighlightPlayer newCP
                             _ -> GEUnhighlightPlayer
 
-        otherPlayers :: [Text]
-        otherPlayers = map playerChanId $
+        otherPlayers :: [(Int,Text)]
+        otherPlayers = map (\p -> (playerNum p,playerChanId p)) $
           filter (\p -> (playerName p /= nm) && (playerName p /= playerName hintedP))
                  (gamePlayers g)
 
-        hintDesc :: Text
-        hintDesc = render $ 
-          case e of
-            Left c -> [hamlet|^{htmlColor c}s|]
-            Right r -> [hamlet|^{htmlRank r}s|]
+        actions :: Int -> [GameEvent]
+        actions pnum =
+            (if pnum == hintedPN then (hintedPlayerCardUpdates:) else id)
+            [highlightPlayer, contentUpdates, GEMessages [message]]
+          where
+            message = descLastAction (Just pnum) g render
 
-        messageHinted,messageHinter,messageOther :: Text
-        messageHinted = T.concat [nm, " gave you a hint about your ",
-                                  hintDesc,"."]
-        messageHinter = T.concat ["You gave ", playerName hintedP,
-                                  " a hint about their ", hintDesc,"."]
-        messageOther = T.concat [nm, " gave ", playerName hintedP,
-                                 " a hint about their ", hintDesc,"."]
-
-        actions :: Text -> [GameEvent]
-        actions message = [highlightPlayer, contentUpdates, GEMessages [message]]
-        
 
 hintForm :: Text -> FormInput App App (Int,Text)
 hintForm hintField = (,) <$> ireq intField playerField
@@ -619,13 +661,15 @@ postRankHintR = do
 -- XXX these can be better cleaned up and combined
 postActionHandler :: Show a => FormInput App App a  -- XXX show
                   -> (a -> Game -> Either String (Game,b))
-                  -> (Game -> Int -> b -> Handler (Maybe Text -> [GameEvent]))
+                  -> (Game -> Int -> b -> Handler (Bool -> [GameEvent]))
                              -- int is current player
                   -> Handler RepJson
 postActionHandler inputform attemptaction handleresult = do
   nm <- requireName
   -- remember that any number sent back to javascript will need a +1
   content <- runInputPost inputform
+  renderParams  <- getUrlRenderParams
+  let render h = pack $ renderHtml $ h renderParams
   (g,result) <- requireGameTransaction (\gid game ->
     case gameStatus game of
       NotStarted  -> return $ (game,Left "The game isn't running.")
@@ -639,16 +683,22 @@ postActionHandler inputform attemptaction handleresult = do
             Left err    -> return $ (game,Left $ pack err)
             Right (g,b) -> do replace gid g
                               return $ (g,Right (currentP,b)))
-  messages <- 
-    case result of 
-      Left err -> return $ const [GEError err]
-      Right (cp,b)  -> handleresult g cp b
-  let otherPlayers :: [Text]
-      otherPlayers = map playerChanId $
-         filter ((/= nm) . playerName) $ gamePlayers g
-  playerChans <- getChannels otherPlayers
-  mapM_ (flip sendMessage $ messages $ Just nm) playerChans
-  jsonToRepJson $ messages Nothing
+  let otherPlayers :: [(Int,Text)]
+      otherPlayers = map (\p -> (playerNum p,playerChanId p)) $
+         filter ((nm /=) . playerName) (gamePlayers g)
+
+      actionDesc :: Int -> GameEvent
+      actionDesc pnum = GEMessages [descLastAction (Just pnum) g render]
+  playerChans <- getChannelsP otherPlayers
+  case result of 
+    Left err -> do
+      mapM_ (\(_,pc) -> sendMessage pc [GEError err]) playerChans
+      jsonToRepJson [GEError err]
+    Right (cp,b) -> do 
+      hres <- handleresult g cp b
+      mapM_ (\(pix,pc) -> sendMessage pc $ actionDesc pix : hres False)
+            playerChans
+      jsonToRepJson $ actionDesc cp : hres True
 
 postDiscardR :: Handler RepJson
 postDiscardR = 
@@ -663,28 +713,19 @@ postDiscardR =
         Right (g',oldcard,newcard) -> Right (g',(card,oldcard,newcard))
 
     handleResult :: Game -> Int -> (Int,Card,Maybe Card) 
-                 -> Handler (Maybe Text -> [GameEvent])
+                 -> Handler (Bool -> [GameEvent])
     handleResult g currentP (oldcardi,oldcard,newcard) = do
       routeRenderer <- getUrlRender
       renderParams  <- getUrlRenderParams
       let
         render h = pack $ renderHtml $ h renderParams
 
-        message :: Maybe Text -> Text
-        message me = T.concat $
-             [fromMaybe "You" me," discarded a ",render $ describeCard oldcard]
-          ++ case newcard of
-               Nothing -> ["."]
-               Just c  -> [" and drew a ",
-                           if isNothing me then render (describeCard c) else "new card",
-                           "."]
-
-        newcardRoute :: Maybe Text -> Maybe Text
+        newcardRoute :: Bool -> Maybe Text
         newcardRoute me = 
-          fmap (if isJust me 
-                  then routeRenderer . StaticR . cardToRoute
-                  else const $ routeRenderer . StaticR $
-                         knowledgeToRoute (Knowledge Mystery Mystery))
+          fmap (if me
+                  then const $ routeRenderer . StaticR $
+                         knowledgeToRoute (Knowledge Mystery Mystery)
+                  else routeRenderer . StaticR . cardToRoute)
           newcard
 
         color :: Color
@@ -711,7 +752,6 @@ postDiscardR =
         [highlightPlayer
         ,GEDiscard {geDiscPlayer = currentP, geDiscCard = oldcardi,
                     geDiscNewCard = newcardRoute me}
-        ,GEMessages [message me]
         ,replaceContent])
   in
     postActionHandler inputForm attemptAction handleResult
@@ -730,7 +770,7 @@ postPlayR =
         Right (g',success,oldcard,newcard) -> Right (g',(card,success,oldcard,newcard))
 
     handleResult :: Game -> Int -> (Int,Bool,Card,Maybe Card) 
-                 -> Handler (Maybe Text -> [GameEvent])
+                 -> Handler (Bool -> [GameEvent])
     handleResult g currentP (oldcardi,success,oldcard,newcard) = do
       routeRenderer <- getUrlRender
       renderParams  <- getUrlRenderParams
@@ -738,23 +778,12 @@ postPlayR =
         render :: HtmlUrl (Route App) -> Text
         render h = pack $ renderHtml $ h renderParams
 
-        message :: Maybe Text -> Text
-        message me = T.concat $ (fromMaybe "You" me) :
-              (if success 
-                 then [" played a ",render $ describeCard oldcard]
-                 else [" tried to play a ",render (describeCard oldcard),", causing a strike, "])
-           ++ case newcard of
-                Nothing -> ["."]
-                Just c  -> [" and drew a ",
-                            if isNothing me then "new card" else render (describeCard c),
-                            "."]
-
-        newcardRoute :: Maybe Text -> Maybe Text
+        newcardRoute :: Bool -> Maybe Text
         newcardRoute me = 
-          fmap (if isJust me 
-                  then routeRenderer . StaticR . cardToRoute
-                  else const $ routeRenderer . StaticR $
-                         knowledgeToRoute (Knowledge Mystery Mystery))
+          fmap (if me 
+                  then const $ routeRenderer . StaticR $
+                         knowledgeToRoute (Knowledge Mystery Mystery)
+                  else routeRenderer . StaticR . cardToRoute)
           newcard
 
         color :: Color
@@ -786,7 +815,6 @@ postPlayR =
         [highlightPlayer
         ,GEPlay {gePlayPlayer = currentP, gePlayCard = oldcardi,
                  gePlayNewCard = newcardRoute me}
-        ,GEMessages [message me]
         ,replaceContent])
   in
     postActionHandler inputForm attemptAction handleResult

@@ -2,7 +2,8 @@ module Handler.Infrastructure
   (cardField, playerField, colorField, rankField,
    cardRowID, colorRowID, rankRowID,
    colorHintID, rankHintID,
-   getChannel, getChannels, newChannel, deleteChannel, sendMessage,
+   getChannel, getChannels, getChannelsP,
+   newChannel, deleteChannel, sendMessage,
    sgameid, requireName, requireGame, requireGameTransaction,
    getSetNameR, postSetNameR,
    GameListEvent(..), GameListMsg(..), PlayerListEvent(..), PlayerListMsg(..))   
@@ -67,6 +68,16 @@ getChannels ids =
      return $ foldl (\cs uid -> case lookup uid chans of 
                                  Nothing -> cs
                                  Just c -> c:cs)
+                    [] ids
+           -- XXX make a new channel?  remove game from DB?
+
+getChannelsP :: [(a,Text)] -> Handler [(a,Chan ServerEvent)]
+getChannelsP ids =
+  do iochans <- liftM gameChannels getYesod
+     chans <- liftIO $ readIORef iochans
+     return $ foldl (\cs (a,uid) -> case lookup uid chans of 
+                                      Nothing -> cs
+                                      Just c -> (a,c):cs)
                     [] ids
            -- XXX make a new channel?  remove game from DB?
 

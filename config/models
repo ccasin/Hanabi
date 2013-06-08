@@ -15,6 +15,7 @@ Game
   strikes   Int
   discards  Discards
   deck      [Card]
+  actions   [ActionLog]
   
 Completed
   players [Text]

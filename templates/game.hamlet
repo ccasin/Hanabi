@@ -29,35 +29,23 @@
           <td class="discardspace">
 
 <div id="actions" class="curvy">
-  <table>
-    <tr>
-      <td class="topactionbutton" colspan="2">
-        <button type="button" class="actionButton" onclick="makePlays ()">Play
-      <td class="topactionbutton" colspan="2">
-        <button type="button" class="actionButton" onclick="makeDiscards ()">Discard
-      <td class="topactionbutton">
-        <button type="button" class="actionButton" onclick="makeHintPeople ()">Hint
-    <tr class="hintPlayerInfo" id="playerHintTextRow" style="display:none;">
-      <td colspan="5">
-        Who would you like to give a hint?
-    <tr class="hintPlayerInfo" id="playerHintButtonRow" style="display:none;">
-      $forall (i,p) <- otherPlayers
-        <td class="playerHintButton">
-          <button type="button" class="playerHintButton" onclick="makeHintTypes(#{i})">
-            #{playerName p}
-    <tr id="typeHintTextRow" style="display:none;">
-      <td colspan="5">
-        Which kind of cards would you like to tell them about?
-    <tr id="colorHintButtonRow" style="display:none;">
-      $forall c <- allColors
-        <td class="colorHintButton">
-          <button type="button" class="colorHintButton" data-cardcolor="#{show c}">
-            #{show c}
-    <tr id="rankHintButtonRow" style="display:none;">
-      $forall r <- allRanks
-        <td class="rankHintButton">
-          <button type="button" class="rankHintButton" data-cardrank="#{show r}">
-            #{describe r}
+  <div id="actionButtons" style=#{actionsStyle}>
+    <button type="button" class="actionButton" onclick="makePlays ()">Play
+    <button type="button" class="actionButton" onclick="makeDiscards ()">Discard
+    <button type="button" class="actionButton" onclick="makeHintPeople ()">Hint
+  <div class="hintPlayerInfo" id="playerHintTextRow" style="display:none;">
+    Who would you like to give a hint?
+  ^{playerListDivs}
+  <div id="typeHintTextRow" style="display:none;">
+    Which kind of cards would you like to tell them about?
+  <div id="colorHintButtonRow" style="display:none;">
+    $forall c <- allColors
+      <button type="button" class="colorHintButton" data-cardcolor="#{show c}">
+        #{show c}
+  <div id="rankHintButtonRow" style="display:none;">
+    $forall r <- allRanks
+      <button type="button" class="rankHintButton" data-cardrank="#{show r}">
+        #{describe r}
     
 
 <div id="chat" class="curvy">
@@ -68,5 +56,5 @@
     <input id="chatinput" type=text name="chatinput" placeholder="Enter Message">
 
 <div id="playerCards">
-  $forall (pn,p) <- players
-    ^{playerDiv pn p}
+  $forall p <- players
+    ^{playerDiv p}

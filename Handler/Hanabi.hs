@@ -315,23 +315,33 @@ gameWidget game nm = do $(widgetFile "game")
                           4 -> addStylesheet $ StaticR css_4players_css
                           _ -> addStylesheet $ StaticR css_5players_css
   where
-    players,otherPlayers :: [(Int,Player)]
-    players      = zip [0..] $ gamePlayers game
-    otherPlayers = filter (\(_,p) -> nm /= playerName p) players
+    players,otherPlayers :: [Player]
+    players      = gamePlayers game
+    otherPlayers = filter ((nm /=) . playerName) players
             
     allRanks :: [Rank]
     allRanks = allHints
     allColors :: [Color]
     allColors = allHints -- XXX remove once no longer ambiguous
 
+    me :: Player
+    me = case find ((==nm) . playerName) players of
+           Nothing -> head players -- XXX return an error or something
+           Just p  -> p
+
     mynum :: Int
-    mynum = 
-      case find ((==nm) . playerName . snd) players of
-         Nothing    -> 0 -- XXX return an error or something
-         Just (n,_) -> n
+    mynum = playerNum me
 
     mychan :: Text
-    mychan = playerChanId (gamePlayers game !! mynum)
+    mychan = playerChanId me
+
+    myturn :: Bool
+    myturn = case gameStatus game of
+               Running {currentP} -> mynum == currentP
+               _ -> False
+
+    actionsStyle :: Text
+    actionsStyle = if myturn then "" else "display:none;"
 
     discards :: [(Color,[(Rank,Int)])]
     discards = map (\c -> (c,getDiscards game c)) allHints
@@ -342,7 +352,27 @@ gameWidget game nm = do $(widgetFile "game")
     numCards :: Int
     numCards = if length players < 4 then 5 else 4
 
-    playerDiv pnum (Player {playerName=name, playerHand=hand}) =
+    playerListDivs =
+      case otherPlayers of
+        (p1:p2:p3:p4:[]) -> 
+          let ps1 = p1:p2:[]
+              ps2 = p3:p4:[]
+           in
+          [hamlet|
+            ^{dispPlayers ps1}
+            ^{dispPlayers ps2}|]
+        ps -> dispPlayers ps
+      where
+        dispPlayers ps =
+          [hamlet|
+            <div class="hintPlayerInfo" style="display:none;">
+              $forall p <- ps
+                <button type="button" class="playerHintButton"
+                        onclick="makeHintTypes(#{playerNum p})">
+                  #{playerName p} |]
+              
+
+    playerDiv (Player {playerName=name, playerHand=hand, playerNum=pnum}) =
      let
        knowledge :: [Knowledge]
        knowledge = map snd hand

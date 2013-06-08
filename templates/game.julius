@@ -105,6 +105,7 @@ function sendColorHint(i,c) {
       $("#typeHintTextRow").fadeOut('slow');
       $("#colorHintButtonRow").fadeOut('slow');
       $("#rankHintButtonRow").fadeOut('slow');
+      $("#actionButtons").fadeOut('slow');
       handleEvents(data);
     })
 }
@@ -117,6 +118,7 @@ function sendRankHint(i,c) {
       $("#typeHintTextRow").fadeOut('slow');
       $("#colorHintButtonRow").fadeOut('slow');
       $("#rankHintButtonRow").fadeOut('slow');
+      $("#actionButtons").fadeOut('slow');
       handleEvents(data);
     })
 }
@@ -165,6 +167,13 @@ function handleEvents (events) {
         } else {
           $("#player"+i).css("border-color","black");
         }
+      }
+      
+      if(hp == #{toJSON mynum}) {
+        $("#actions").css("border-color","red");
+        $("#actionButtons").fadeIn('slow');
+      } else {
+        $("#actions").css("border-color","black");
       }
     }
 

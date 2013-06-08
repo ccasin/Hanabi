@@ -62,6 +62,10 @@ button.actionButton {
   width:75px;
 }
 
+div#actionButtons {
+  width:100%;
+}
+
 /**************************/
 /**** The discards div ****/
 table.discardtable {

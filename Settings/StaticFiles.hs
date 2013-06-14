@@ -5,7 +5,7 @@ import Yesod.Static
 import qualified Yesod.Static as Static
 import Settings (staticDir)
 import Settings.Development
-import Model
+import ModelTypes
 
 -- | use this to create your static file serving site
 staticSite :: IO Static.Static

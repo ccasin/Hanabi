@@ -1,0 +1,24 @@
+Default: &defaults
+  user: Test
+  password: Test
+  host: localhost
+  port: 5432
+  database: Test
+  poolsize: 10
+
+Development:
+  <<: *defaults
+
+Testing:
+  database: Hanabi_test
+  <<: *defaults
+
+Staging:
+  database: Hanabi_staging
+  poolsize: 100
+  <<: *defaults
+
+Production:
+  database: hanabi
+  poolsize: 100
+  <<: *defaults

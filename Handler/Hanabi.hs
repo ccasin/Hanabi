@@ -111,7 +111,7 @@ strikesTdContent i = [hamlet|<b>Strikes:</b> #{i}|]
 --------------------------
 
 --- XXX MUST REMOVE
-getDumpTablesR :: Handler RepHtml
+getDumpTablesR :: Handler Html
 getDumpTablesR =
   do people <- runDB $ selectList ([] :: [Filter User]) []
      defaultLayout [whamlet|
@@ -412,9 +412,9 @@ playerListWidget nm game =
   let names = prettyNameList game
       guid = gameUid game
   in
-  do playerList <- lift newIdent
-     mbox <- lift newIdent
-     startButton <- lift newIdent
+  do playerList <- newIdent
+     mbox <- newIdent
+     startButton <- newIdent
      [whamlet|
        <p id=#{mbox}>
        <p id=#{playerList}>#{names}
@@ -461,7 +461,7 @@ playerListWidget nm game =
         }; 
      |]
 
-getPlayHanabiR :: Handler RepHtml
+getPlayHanabiR :: Handler Html
 getPlayHanabiR = do
   nm <- requireName
   game <- requireGame
@@ -490,7 +490,7 @@ getGameEventReceiveR guid = do
   chan0 <- getChannel guid
   chan <- liftIO $ dupChan chan0
   req <- waiRequest
-  res <- lift $ eventSourceAppChan chan req
+  res <- liftResourceT $ eventSourceAppChan chan req
   sendWaiResponse res
 
 getPlayerEventReceiveR :: Text -> Handler ()
@@ -498,7 +498,7 @@ getPlayerEventReceiveR uid = do
   chan0 <- getChannel uid
   chan <- liftIO $ dupChan chan0
   req <- waiRequest
-  res <- lift $ eventSourceAppChan chan req
+  res <- liftResourceT $ eventSourceAppChan chan req
   sendWaiResponse res
 
 
@@ -584,7 +584,7 @@ descLastAction msgp game render =
                     
 
 
-postChatR :: Handler RepJson
+postChatR :: Handler Value
 postChatR = do
   msg <- runInputPost $ ireq textField "content"
   nm  <- requireName
@@ -596,11 +596,11 @@ postChatR = do
       message=T.concat ["<b>&lt;",nm,"&gt;</b> ",msg]
   playerChans <- getChannels otherPlayers
   mapM_ (flip sendMessage $ [GEMessages [message]]) playerChans
-  jsonToRepJson $ [GEMessages [message]]
+  returnJson [GEMessages [message]]
 
 
 -- XXX check for game end
-hintHandler :: Int -> Either Color Rank -> Handler RepJson
+hintHandler :: Int -> Either Color Rank -> Handler Value
 hintHandler hintedPN e = do
   nm         <- requireName
   renderParams  <- getUrlRenderParams
@@ -620,11 +620,11 @@ hintHandler hintedPN e = do
               do replace gid game'
                  return (game',Right (hplayer,highlightedCards,currentP)))
   case result of
-    Left err            -> jsonToRepJson [GEError $ pack err]
+    Left err            -> returnJson [GEError $ pack err]
     Right (hintedP,hintedCards,cpnum) -> do 
        otherPlayerChans <- getChannelsP $ otherPlayers
        mapM_ (\(pix,pc) -> sendMessage pc $ actions pix) otherPlayerChans
-       jsonToRepJson $ actions cpnum
+       returnJson $ actions cpnum
       where
         hintIdField :: Int -> Text
         hintIdField card = 
@@ -666,32 +666,32 @@ hintHandler hintedPN e = do
             message = descLastAction (Just pnum) g render
 
 
-hintForm :: Text -> FormInput App App (Int,Text)
+hintForm :: Text -> FormInput Handler (Int,Text)
 hintForm hintField = (,) <$> ireq intField playerField
                          <*> ireq textField hintField
 
-postColorHintR :: Handler RepJson
+postColorHintR :: Handler Value
 postColorHintR = do
   (p,ctext) <- runInputPost $ hintForm colorField
   case readMay $ unpack ctext of
     Just c  -> hintHandler p $ Left c
-    Nothing -> jsonToRepJson $ GEError
+    Nothing -> returnJson $ GEError
         "Invalid hint input.  Please try refreshing your page" -- XXX
 
-postRankHintR :: Handler RepJson
+postRankHintR :: Handler Value
 postRankHintR = do
   (p,ctext) <- runInputPost $ hintForm rankField
   case readMay $ unpack ctext of
     Just r  -> hintHandler p $ Right r
-    Nothing -> jsonToRepJson $ GEError
+    Nothing -> returnJson $ GEError
        "Invalid hint input.  Please try refreshing your page" -- XXX
 
 -- XXX these can be better cleaned up and combined
-postActionHandler :: Show a => FormInput App App a  -- XXX show
+postActionHandler :: Show a => FormInput Handler a  -- XXX show
                   -> (a -> Game -> Either String (Game,b))
                   -> (Game -> Int -> b -> Handler (Bool -> [GameEvent]))
                              -- int is current player
-                  -> Handler RepJson
+                  -> Handler Value
 postActionHandler inputform attemptaction handleresult = do
   nm <- requireName
   -- remember that any number sent back to javascript will need a +1
@@ -721,17 +721,17 @@ postActionHandler inputform attemptaction handleresult = do
   case result of 
     Left err -> do
       mapM_ (\(_,pc) -> sendMessage pc [GEError err]) playerChans
-      jsonToRepJson [GEError err]
+      returnJson [GEError err]
     Right (cp,b) -> do 
       hres <- handleresult g cp b
       mapM_ (\(pix,pc) -> sendMessage pc $ actionDesc pix : hres False)
             playerChans
-      jsonToRepJson $ actionDesc cp : hres True
+      returnJson $ actionDesc cp : hres True
 
-postDiscardR :: Handler RepJson
-postDiscardR = 
+postDiscardR :: Handler Value
+postDiscardR =
   let
-    inputForm :: FormInput App App Int
+    inputForm :: FormInput Handler Int
     inputForm = ireq intField cardField
 
     attemptAction :: Int -> Game -> Either String (Game,(Int,Card,Maybe Card))
@@ -784,10 +784,10 @@ postDiscardR =
   in
     postActionHandler inputForm attemptAction handleResult
 
-postPlayR :: Handler RepJson
+postPlayR :: Handler Value
 postPlayR =
   let
-    inputForm :: FormInput App App Int
+    inputForm :: FormInput Handler Int
     inputForm = ireq intField cardField
 
     attemptAction :: Int -> Game

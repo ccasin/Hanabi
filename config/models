@@ -3,6 +3,7 @@ User
   credID      Text
   name        Text
   UniqueCreds credSource credID
+  deriving Typeable
 
 Game
   status    GameStatus

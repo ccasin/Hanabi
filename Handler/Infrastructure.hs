@@ -13,7 +13,6 @@ import Data.IORef
 import Data.Text (pack,append,strip)
 import qualified Data.Text as T (length,concat)
 import Data.List (foldl')
-import Data.Maybe (isJust)
 
 import System.Random (randomRIO)
 
@@ -135,7 +134,7 @@ requireGame = do
                       redirect HanabiLobbyR
         Just (Entity _ g) -> return g
 
-requireGameTransaction :: (GameId -> Game -> YesodDB App App a) -> Handler a
+requireGameTransaction :: (GameId -> Game -> YesodDB App a) -> Handler a
 requireGameTransaction trans = do
   mguid <- lookupGame
   res <- case mguid of 
@@ -156,8 +155,8 @@ nameForm = renderDivs $ areq textField "" {fsAttrs = [("maxLength","20")]} Nothi
 ------------------------
 ----- Name handlers ----
 
-getSetNameR :: Handler RepHtml
-getSetNameR =
+getSetNameR :: Handler Html
+getSetNameR = -- XXX check if user is in game
   do Entity _ user <- requireAuth
      (widget,enctype) <- generateFormPost nameForm
      defaultLayout [whamlet|

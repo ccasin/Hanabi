@@ -10,17 +10,17 @@ import Import
 -- The majority of the code you will write in Yesod lives in these handler
 -- functions. You can spread them across multiple files if you are so
 -- inclined, or create a single monolithic file.
-getHomeR :: Handler RepHtml
+getHomeR :: Handler Html
 getHomeR = do
     (formWidget, formEnctype) <- generateFormPost sampleForm
     let submission = Nothing :: Maybe (FileInfo, Text)
         handlerName = "getHomeR" :: Text
     defaultLayout $ do
-        aDomId <- lift newIdent
+        aDomId <- newIdent
         setTitle "Welcome To Yesod!"
         $(widgetFile "homepage")
 
-postHomeR :: Handler RepHtml
+postHomeR :: Handler Html
 postHomeR = do
     ((result, formWidget), formEnctype) <- runFormPost sampleForm
     let handlerName = "postHomeR" :: Text
@@ -29,7 +29,7 @@ postHomeR = do
             _ -> Nothing
 
     defaultLayout $ do
-        aDomId <- lift newIdent
+        aDomId <- newIdent
         setTitle "Welcome To Yesod!"
         $(widgetFile "homepage")
 

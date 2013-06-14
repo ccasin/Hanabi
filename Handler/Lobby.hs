@@ -15,9 +15,9 @@ import Handler.Infrastructure
 
 gameListWidget :: [Entity Game] -> Widget
 gameListWidget games = do
-  do glistI <- lift newIdent
-     instructionsI <- lift newIdent
-     gplayersC <- lift newIdent
+  do glistI <- newIdent
+     instructionsI <- newIdent
+     gplayersC <- newIdent
      let nogames,somegames :: Text
          nogames = "There are no games waiting for players."
          somegames = (         "You can join a game or create a new one.  "
@@ -83,7 +83,7 @@ gameListWidget games = do
         }; |]
 
 
-getHanabiLobbyR :: Handler RepHtml
+getHanabiLobbyR :: Handler Html
 getHanabiLobbyR =
   do nm <- requireName
      mguid <- lookupSession sgameid
@@ -107,5 +107,5 @@ getLobbyEventReceiveR = do
   chan0 <- liftM lobbyChannel getYesod
   chan <- liftIO $ dupChan chan0
   req <- waiRequest
-  res <- lift $ eventSourceAppChan chan req
+  res <- liftResourceT $ eventSourceAppChan chan req
   sendWaiResponse res

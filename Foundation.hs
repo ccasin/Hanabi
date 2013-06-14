@@ -7,13 +7,14 @@ import Yesod.Auth
 import qualified Yesod.Auth.GoogleEmail as GID
 import qualified Yesod.Auth.OpenId as OID
 import Yesod.Auth.Facebook.ServerSide
+import Yesod.Facebook (YesodFacebook(..))
 import Facebook (Credentials (Credentials))
 import Yesod.Default.Config
 import Yesod.Default.Util (addStaticContentExternal)
 import Network.HTTP.Conduit (Manager)
 import qualified Settings
 import Settings.Development (development)
-import qualified Database.Persist.Store
+import qualified Database.Persist
 import Settings.StaticFiles
 
 import Settings.Facebook (fbName, fbId, fbSecret)
@@ -21,11 +22,10 @@ import Settings.Facebook (fbName, fbId, fbSecret)
 -- Just fill in these things with any old Text values to make the app build w/o 
 -- Facebook authentication
 
-import Database.Persist.GenericSql
+import Database.Persist.Sql (SqlPersistT)
 import Settings (widgetFile, Extra (..))
 import Model
 import Text.Jasmine (minifym)
-import Web.ClientSession (getKey)
 import Text.Hamlet (hamletFile)
 import System.Log.FastLogger (Logger)
 
@@ -43,9 +43,9 @@ import Control.Monad (liftM)
 data App = App
     { settings :: AppConfig DefaultEnv Extra
     , getStatic :: Static -- ^ Settings for static file serving.
-    , connPool :: Database.Persist.Store.PersistConfigPool Settings.PersistConfig -- ^ Database connection pool.
+    , connPool :: Database.Persist.PersistConfigPool Settings.PersistConf -- ^ Database connection pool.
     , httpManager :: Manager
-    , persistConfig :: Settings.PersistConfig
+    , persistConfig :: Settings.PersistConf
     , appLogger :: Logger
     , lobbyChannel :: Chan ServerEvent
     , gameChannels :: IORef [(Text,Chan ServerEvent)]
@@ -75,7 +75,7 @@ mkMessage "App" "messages" "en"
 -- split these actions into two functions and place them in separate files.
 mkYesodData "App" $(parseRoutesFile "config/routes")
 
-type Form x = Html -> MForm App App (FormResult x, Widget)
+type Form x = Html -> MForm (HandlerT App IO) (FormResult x, Widget)
 
 -- Please see the documentation for the Yesod typeclass. There are a number
 -- of settings which can be configured by overriding methods here.
@@ -84,11 +84,9 @@ instance Yesod App where
 
     -- Store session data on the client in encrypted cookies,
     -- default session idle timeout is 120 minutes
-    makeSessionBackend _ = do
-        key <- getKey "config/client_session_key.aes"
-        let timeout = 120 * 60 -- 120 minutes
-        (getCachedDate, _closeDateCache) <- clientSessionDateCacher timeout
-        return . Just $ clientSessionBackend2 key getCachedDate
+    makeSessionBackend _ = fmap Just $ defaultClientSessionBackend
+        (120 * 60) -- 120 minutes
+        "config/client_session_key.aes"
 
     defaultLayout widget = do
         master <- getYesod
@@ -106,7 +104,7 @@ instance Yesod App where
             addScriptRemote "https://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"
             -- addScript (StaticR jquery_js)
             $(widgetFile "default-layout")
-        hamletToRepHtml $(hamletFile "templates/default-layout-wrapper.hamlet")
+        giveUrlRenderer $(hamletFile "templates/default-layout-wrapper.hamlet")
 
     -- This is done to provide an optimization for serving static files from
     -- a separate domain. Please see the staticRoot setting in Settings.hs
@@ -133,24 +131,21 @@ instance Yesod App where
 
 -- How to run database actions.
 instance YesodPersist App where
-    type YesodPersistBackend App = SqlPersist
-    runDB f = do
-        master <- getYesod
-        Database.Persist.Store.runPool
-            (persistConfig master)
-            f
-            (connPool master)
+    type YesodPersistBackend App = SqlPersistT
+    runDB = defaultRunDB persistConfig connPool
+instance YesodPersistRunner App where
+    getDBRunner = defaultGetDBRunner connPool
 
 authRandom :: AuthPlugin App
 authRandom = AuthPlugin "random" dispatch login
   where
-    dispatch :: Text -> [Text] -> GHandler Auth App ()
+    dispatch :: Text -> [Text] -> HandlerT Auth (HandlerT App IO) ()
     dispatch "POST" [] = do
       uid <- liftIO $ liftM (pack.show) $ randomRIO (1 :: Int,1000000000)
-      taken <- runDB $ getBy $ UniqueCreds "random" uid
+      taken <- lift $ runDB $ getBy $ UniqueCreds "random" uid
       case taken of
         Just _  -> dispatch "POST" []
-        Nothing -> setCreds True $ Creds "random" uid []
+        Nothing -> lift $ setCreds True $ Creds "random" uid []
     dispatch _ _ = notFound
 
     loginUrl = PluginR "random" []
@@ -160,10 +155,15 @@ authRandom = AuthPlugin "random" dispatch login
       |]
     
 
-loginPage :: GWidget s App ()
+loginPage :: Widget
 loginPage = $(widgetFile "login")
   where
     dummyUrl = AuthR $ PluginR "random" []
+
+instance YesodFacebook App where
+    fbCredentials _ = Credentials fbName fbId fbSecret
+    fbHttpManager = httpManager
+    fbUseBetaTier _ = False
 
 instance YesodAuth App where
     type AuthId App = UserId
@@ -186,13 +186,13 @@ instance YesodAuth App where
 
     -- You can add other plugins like BrowserID, email or OAuth here
     authPlugins _ = [GID.authGoogleEmail
-                    ,authFacebook (Credentials fbName fbId fbSecret) []
+                    ,authFacebook []
                     ,OID.authOpenId OID.OPLocal []
                     ,authRandom]
 
     authHttpManager = httpManager
 
-    loginHandler = defaultLayout $ [whamlet|^{loginPage}|]
+    loginHandler = lift $ defaultLayout $ [whamlet|^{loginPage}|]
 
 -- This instance is required to use forms. You can modify renderMessage to
 -- achieve customized and internationalized form validation messages.

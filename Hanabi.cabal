@@ -100,7 +100,7 @@ executable         Hanabi
     hs-source-dirs:    app
     build-depends:     base
                      , Hanabi
-                     , yesod-default
+                     , yesod
 
     ghc-options:       -threaded -O2
 

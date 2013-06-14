@@ -20,5 +20,5 @@ Staging:
 
 Production:
   database: hanabi
-  poolsize: 100
+  poolsize: 20
   <<: *defaults

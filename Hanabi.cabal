@@ -89,6 +89,9 @@ library
                  , mtl                           >= 2.1        && < 2.2
                  , fb                            >= 0.14       && < 0.15
 
+                 , unordered-containers          >= 0.2        && < 0.3
+                 , heroku                        >= 0.1        && < 0.2
+
 executable         Hanabi
     if flag(library-only)
         Buildable: False

@@ -16,6 +16,6 @@ Staging:
   <<: *defaults
 
 Production:
-  approot: "http://158.130.106.147:3000"
+  approot: "http://hanabi.herokuapp.com"
   #approot: "http://localhost:3000"
   <<: *defaults

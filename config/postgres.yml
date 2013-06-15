@@ -1,9 +1,9 @@
 Default: &defaults
-  user: Test
-  password: Test
+  user: hanabidb
+  password: hanabidb
   host: localhost
   port: 5432
-  database: Test
+  database: hanabi
   poolsize: 10
 
 Development:

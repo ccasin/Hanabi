@@ -4,9 +4,8 @@
 /favicon.ico FaviconR GET
 /robots.txt RobotsR GET
 
-/ HomeR GET POST
+/ HanabiLobbyR GET
 
-/hanabilobby               HanabiLobbyR          GET
 /createhanabi              CreateHanabiR         POST
 /joinhanabi/#Text          JoinHanabiR           POST
 /unjoinhanabi              UnjoinHanabiR         POST

@@ -16,6 +16,6 @@ Staging:
   <<: *defaults
 
 Production:
-  approot: "http://hanabi.herokuapp.com"
+  approot: "http://hanabi.tyconmismatch.com"
   #approot: "http://localhost:3000"
   <<: *defaults

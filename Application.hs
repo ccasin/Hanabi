@@ -32,7 +32,6 @@ import qualified Web.Heroku
 
 -- Import all relevant handler modules here.
 -- Don't forget to add new modules to your cabal file!
-import Handler.Home
 import Handler.Hanabi
 import Handler.Infrastructure (getSetNameR,postSetNameR)
 import Handler.Lobby (getHanabiLobbyR,getLobbyEventReceiveR)

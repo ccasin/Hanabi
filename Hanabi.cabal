@@ -21,7 +21,6 @@ library
                      Settings.StaticFiles
                      Settings.Facebook
                      Settings.Development
-                     Handler.Home
                      Handler.Infrastructure
                      Handler.Lobby
                      Handler.Hanabi
